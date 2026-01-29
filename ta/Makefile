@@ -1,0 +1,6 @@
+CFG_TEE_TA_LOG_LEVEL ?= 4
+
+# TA UUID
+BINARY = 12345678-1234-1234-1234-123456789abc
+
+include $(TA_DEV_KIT_DIR)/mk/ta_dev_kit.mk
