@@ -16,18 +16,23 @@ repo sync
 cd build && make toolchains && make -j$(nproc)   
 ```   
 
-2. Copy this project into the optee_examples   
+2. Git Repo Clone   
+```
+gh repo clone JLGGG/crypto_ta ~/crypto_ta
+```
+
+3. Copy this project into the optee_examples   
 ```
 cp -r ~/crypto_ta ~/optee/optee_examples/crypto_ta   
 ```
 
-3. Build
+4. Build
 ```
 cd ~/optee/build   
 make -j$(nproc) # In the initial time, it may take above 30m.   
 ```
 
-4. Build host only (When facing a build error in all code)   
+5. Build host only (When facing a build error in all code)   
 ```
 cd ~/optee/optee_examples/crypto_ta/host   
 export CROSS_COMPILE=$HOME/optee/out-br/host/bin/aarch64-linux-gnu-       
@@ -36,23 +41,23 @@ make clean
 make V=1 CC=${CROSS_COMPILE}gcc
 ``` 
 
-5. Run
+6. Run
 ```
 make run   
 ```
 
-6. QEMU Normal World   
+7. QEMU Normal World   
 ```
 optee_example_crypto_ta   
 ```   
 
-7. All-in-one build and QEMU run    
+8. All-in-one build and QEMU run    
 This script provides building and running the crypto_ta. To use this, you must complete step 1.
 ```
 ~/crypto_ta/run.sh # If you want to build only, you can do so by adding "--build-only" flag
 ```
 
-8. Tools   
+9. Tools   
 ```
 The command below searches for information about the supported algorithms on TEE by replacing "*".    
 grep -r "*" ~/optee/optee_os/lib/libutee/include
