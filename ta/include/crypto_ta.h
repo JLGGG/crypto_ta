@@ -11,11 +11,11 @@
 #define CMD_SHA512              1
 #define CMD_AES_CMAC_PREPARE    2
 #define CMD_AES_CMAC            3
-#define CMD_AES_ENC             4
-#define CMD_AES_DEC             5
+#define CMD_HKDF_DERIVE         4
 
 // Algorithm (from GlobalPlatform TEE Internal Core API)
-#define CRYPTO_ALG_AES_CMAC     0x30000610
+#define CRYPTO_ALG_AES_CMAC                 0x30000610
+#define CRYPTO_ALG_HKDF_SHA256_DERIVE_KEY   0x800040C0
 
 // Mode
 #define CRYPTO_MODE_ENCRYPT     0x00000000
@@ -31,5 +31,6 @@
 #define AES_128_KEY_SIZE        16
 #define AES_192_KEY_SIZE        24
 #define AES_256_KEY_SIZE        32
+#define SHA256_HASH_SIZE        32
 
 #endif // CRYPTO_TA_H

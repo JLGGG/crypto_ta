@@ -52,6 +52,12 @@ This script provides building and running the crypto_ta. To use this, you must c
 ~/crypto_ta/run.sh # If you want to build only, you can do so by adding "--build-only" flag
 ```
 
+8. Tools   
+```
+The command below searches for information about the supported algorithms on TEE by replacing "*".    
+grep -r "*" ~/optee/optee_os/lib/libutee/include
+```
+
 ## UUID   
 ```
 12345678-1234-1234-1234-123456789abc

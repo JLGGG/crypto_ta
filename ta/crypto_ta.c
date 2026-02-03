@@ -247,6 +247,127 @@ out:
     return res;
 }
 
+static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TEE_ObjectHandle ikm_handle = TEE_HANDLE_NULL;
+    TEE_ObjectHandle okm_handle = TEE_HANDLE_NULL;
+    TEE_Attribute attrs[3];
+    uint32_t attr_count = 0U;
+
+    void *ikm = NULL;
+    size_t ikm_size = 0U;
+    void *salt = NULL;
+    size_t salt_size = 0U;
+    void *info = NULL;
+    size_t info_size = 0U;
+    uint32_t okm_size = 0U;
+
+    // params[0]: IKM (Input key Material) - MEMREF_INPUT
+    // params[1]: Salt (can be empty) - MEMREF_INPUT
+    // params[2]: Info (can be empty) - MEMREF_INPUT
+    // params[3]: OKM (Output Key Material) - MEMREF_OUTPUT
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_OUTPUT
+    );
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    ikm = params[0].memref.buffer;
+    ikm_size = params[0].memref.size;
+    salt = params[1].memref.buffer;
+    salt_size = params[1].memref.size;
+    info = params[2].memref.buffer;
+    info_size = params[2].memref.size;
+    okm_size = params[3].memref.size;
+
+    if (!ikm || ikm_size == 0 || okm_size == 0)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_HKDF_IKM, ikm_size * 8, &ikm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate IKM object: 0x%x", res);
+        goto clean;
+    }
+
+    TEE_InitRefAttribute(&attrs[0], TEE_ATTR_HKDF_IKM, ikm, ikm_size);
+    res = TEE_PopulateTransientObject(ikm_handle, &attrs[0], 1);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to populate IKM: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AllocateOperation(&op, TEE_ALG_HKDF_SHA256_DERIVE_KEY, TEE_MODE_DERIVE, ikm_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_SetOperationKey(op, ikm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to set operation key: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_GENERIC_SECRET, okm_size * 8, &okm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate OKM object: 0x%x", res);
+        goto clean;
+    }
+
+    if (salt && salt_size > 0)
+    {
+        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_SALT, salt, salt_size);
+        attr_count++;
+    }
+
+    if (info && info_size > 0)
+    {
+        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_INFO, info, info_size);
+        attr_count++;
+    }
+    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, okm_size, 0);
+    attr_count++;
+
+    res = TEE_DeriveKey(op, attrs, attr_count, okm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_DeriveKey failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, params[3].memref.buffer, &okm_size);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to get OKM: 0x%x", res);
+        goto clean;
+    }
+
+    params[3].memref.size = okm_size;
+    DMSG("HKDF derived %u bytes", okm_size);
+
+clean:
+    TEE_FreeOperation(op);
+    TEE_FreeTransientObject(ikm_handle);
+    TEE_FreeTransientObject(okm_handle);
+    return res;
+}
+
 TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, TEE_Param params[4])
 {
     switch(cmd)
