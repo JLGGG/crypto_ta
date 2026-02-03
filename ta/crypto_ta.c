@@ -119,8 +119,8 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
     const uint32_t exp_param_types = TEE_PARAM_TYPES(
         TEE_PARAM_TYPE_VALUE_INPUT,
         TEE_PARAM_TYPE_VALUE_INPUT,
-        TEE_PARAM_TYPE_MEMREF_INPUT,
-        TEE_PARAM_TYPE_NONE);
+        TEE_PARAM_TYPE_VALUE_INPUT,
+        TEE_PARAM_TYPE_MEMREF_INPUT);
 
     DMSG("Session %p: get resources", session);
     sess = session;
@@ -131,8 +131,8 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
     }
 
     sess->algo = params[0].value.a;
-    sess->key_size = params[1].value.a;
-    sess->mode = TEE_MODE_MAC;
+    sess->mode = params[1].value.a;
+    sess->key_size = params[2].value.a;
 
     if (sess->op_handle != TEE_HANDLE_NULL)
     {
@@ -140,6 +140,7 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         sess->op_handle = TEE_HANDLE_NULL;
     }
 
+    // maxKeySize bits can be performed.
     res = TEE_AllocateOperation(&sess->op_handle, sess->algo, sess->mode, sess->key_size * 8);
     if (res != TEE_SUCCESS)
     {
@@ -160,8 +161,8 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         goto err;
     }
 
-    key = params[2].memref.buffer;
-    key_size = params[2].memref.size;
+    key = params[3].memref.buffer;
+    key_size = params[3].memref.size;
     TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, key, key_size);
     res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
     if (res != TEE_SUCCESS)

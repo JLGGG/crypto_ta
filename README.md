@@ -7,6 +7,9 @@ Examples of Trusted Application in OP-TEE Crypto
 - SHA-512   
 
 ## How to build
+0. All-in-one build and QEMU run
+> ~/crypto_ta/run.sh # If you want to build only, you can do so by adding "--build-only" flag
+
 1. Set up an OP-TEE development environment (QEMU v8)   
 > mkdir ~/optee && cd ~/optee   
 > repo init -u https://github.com/OP-TEE/manifest.git -m qemu_v8.xml   
