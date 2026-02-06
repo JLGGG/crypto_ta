@@ -33,4 +33,9 @@
 #define AES_256_KEY_SIZE        32
 #define SHA256_HASH_SIZE        32
 
+#define HKDF_IKM_MAX_SIZE       64 // Max size for IKM, typically a SHA-512 digest
+#define HKDF_SALT_MAX_SIZE      64
+#define HKDF_INFO_MAX_SIZE      128
+#define HKDF_OKM_MAX_SIZE       64
+
 #endif // CRYPTO_TA_H

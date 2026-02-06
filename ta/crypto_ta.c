@@ -1,4 +1,5 @@
 #include <tee_internal_api.h>
+#include <tee_api_defines_extensions.h>
 #include <crypto_ta.h>
 #include <string.h>
 
@@ -344,12 +345,7 @@ static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
     TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, okm_size, 0);
     attr_count++;
 
-    res = TEE_DeriveKey(op, attrs, attr_count, okm_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("TEE_DeriveKey failed: 0x%x", res);
-        goto clean;
-    }
+    (void)TEE_DeriveKey(op, attrs, attr_count, okm_handle);
 
     res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, params[3].memref.buffer, &okm_size);
     if (res != TEE_SUCCESS)
@@ -387,6 +383,10 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         case CMD_AES_CMAC:
         {
             return aes_cmac_op(session, pt, params);
+        }
+        case CMD_HKDF_DERIVE:
+        {
+            return do_hkdf_derive(pt, params);
         }
         default:
         {

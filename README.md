@@ -6,6 +6,7 @@ Examples of Trusted Application in OP-TEE Crypto
 - SHA-256   
 - SHA-512   
 - AES-CMAC   
+- HKDF-SHA-256   
 
 ## How to build
 1. Set up an OP-TEE development environment (QEMU v8)   
