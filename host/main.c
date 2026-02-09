@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <tee_client_api.h>
-#include <crypto_ta.h>
+
+#include "tee_test_vector.h"
 
 int main(int argc, char *argv[])
 {
@@ -13,16 +14,12 @@ int main(int argc, char *argv[])
     uint32_t err_origin;
 
     char *input = "Hello OP-TEE Crypto!";
-    uint8_t hash_sha256[32];
-    uint8_t hash_sha512[64];
+    uint8_t hash_sha256[SHA256_HASH_SIZE];
+    uint8_t hash_sha512[SHA512_HASH_SIZE];
     uint8_t aes_cmac[AES_128_KEY_SIZE];
-    uint8_t aes_128_key[AES_128_KEY_SIZE] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
-                                            0x0b, 0x0c, 0x0d, 0x0e, 0x0f};
-    uint8_t hkdf_ikm[HKDF_IKM_MAX_SIZE] = {0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-                                            0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b};
-    uint8_t hkdf_salt[HKDF_SALT_MAX_SIZE] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c};
-    uint8_t hkdf_info[HKDF_INFO_MAX_SIZE] = {0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9};
+    uint8_t aes_cmac_result = 0U;
     uint8_t hkdf_okm[HKDF_OKM_MAX_SIZE];
+    uint8_t hkdf_result = 0U;
 
     res = TEEC_InitializeContext(NULL, &ctx);
     if (res != TEEC_SUCCESS)
@@ -95,9 +92,9 @@ int main(int argc, char *argv[])
 
     op.params[0].value.a = CRYPTO_ALG_AES_CMAC;
     op.params[1].value.a = CRYPTO_MODE_MAC;
-    op.params[2].value.a = AES_128_KEY_SIZE;
-    op.params[3].tmpref.buffer = aes_128_key;
-    op.params[3].tmpref.size = sizeof(aes_128_key);
+    op.params[2].value.a = cmac_test_case_01.key_len;
+    op.params[3].tmpref.buffer = cmac_test_case_01.aes_128_key;
+    op.params[3].tmpref.size = sizeof(cmac_test_case_01.aes_128_key);
 
     res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC_PREPARE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
@@ -129,9 +126,17 @@ int main(int argc, char *argv[])
     printf("AES-128-CMAC: ");
     for (int i=0; i<AES_128_KEY_SIZE; i++)
     {
-        printf("%02x", aes_cmac[i]);
+        aes_cmac_result |= aes_cmac[i] ^ cmac_test_case_01.expected_cmac[i];
+
     }
-    printf("\n");
+    if (!aes_cmac_result)
+    {
+        printf("[SUCCESS]: AES-128-CMAC\n");
+    }
+    else
+    {
+        printf("[FAIL]: AES-128-CMAC\n");
+    }
 
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
@@ -141,14 +146,14 @@ int main(int argc, char *argv[])
         TEEC_MEMREF_TEMP_OUTPUT
     );
 
-    op.params[0].tmpref.buffer = hkdf_ikm;
-    op.params[0].tmpref.size = 22;
-    op.params[1].tmpref.buffer = hkdf_salt;
-    op.params[1].tmpref.size = 13;
-    op.params[2].tmpref.buffer = hkdf_info;
-    op.params[2].tmpref.size = 10;
+    op.params[0].tmpref.buffer = hkdf_test_case_01.ikm;
+    op.params[0].tmpref.size = hkdf_test_case_01.ikm_len;
+    op.params[1].tmpref.buffer = hkdf_test_case_01.salt;
+    op.params[1].tmpref.size = hkdf_test_case_01.salt_len;
+    op.params[2].tmpref.buffer = hkdf_test_case_01.info;
+    op.params[2].tmpref.size = hkdf_test_case_01.info_len;
     op.params[3].tmpref.buffer = hkdf_okm;
-    op.params[3].tmpref.size = 42;
+    op.params[3].tmpref.size = hkdf_test_case_01.expected_okm_len;
 
     res = TEEC_InvokeCommand(&sess, CMD_HKDF_DERIVE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
@@ -158,11 +163,18 @@ int main(int argc, char *argv[])
     }
 
     printf("HKDF-SHA256: ");
-    for (int i=0; i<42; i++)
+    for (int i=0; i<hkdf_test_case_01.expected_okm_len; i++)
     {
-        printf("%02x", hkdf_okm[i]);
+        hkdf_result |= hkdf_okm[i] ^ hkdf_test_case_01.expected_okm[i];
     }
-    printf("\n");
+    if (!hkdf_result)
+    {
+        printf("[SUCCESS]: HKDF-SHA-256\n");
+    }
+    else
+    {
+        printf("[FAIL]: HKDF-SHA-256\n");
+    }
 
 cleanup_sess:
     TEEC_CloseSession(&sess);
