@@ -1,8 +1,8 @@
 project (optee_example_crypto_ta C)
 
-set (SRC host/main.c host/tee_test_vector.c)
+file(GLOB SRCS CONFIGURE_DEPENDS "*.c" "${CMAKE_CURRENT_SOURCE_DIR}/host/*.c")
 
-add_executable (${PROJECT_NAME} ${SRC})
+add_executable (${PROJECT_NAME} ${SRCS})
 
 target_include_directories(${PROJECT_NAME}
                            PRIVATE ta/include

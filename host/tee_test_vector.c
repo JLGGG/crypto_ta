@@ -1,4 +1,4 @@
-#include "tee_test_vector.h"
+#include "include/tee_test_vector.h"
 
 aes_cmac_test_case_t cmac_test_case_01 = {
     .aes_128_key = {

@@ -2,7 +2,7 @@
 #include <string.h>
 #include <tee_client_api.h>
 
-#include "tee_test_vector.h"
+#include "include/tee_test_vector.h"
 
 int main(int argc, char *argv[])
 {
@@ -131,11 +131,11 @@ int main(int argc, char *argv[])
     }
     if (!aes_cmac_result)
     {
-        printf("[SUCCESS]: AES-128-CMAC\n");
+        printf("[SUCCESS]\n");
     }
     else
     {
-        printf("[FAIL]: AES-128-CMAC\n");
+        printf("[FAIL]\n");
     }
 
     memset(&op, 0, sizeof(op));
@@ -169,11 +169,11 @@ int main(int argc, char *argv[])
     }
     if (!hkdf_result)
     {
-        printf("[SUCCESS]: HKDF-SHA-256\n");
+        printf("[SUCCESS]\n");
     }
     else
     {
-        printf("[FAIL]: HKDF-SHA-256\n");
+        printf("[FAIL]\n");
     }
 
 cleanup_sess:
