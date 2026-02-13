@@ -27,9 +27,13 @@
 #define CRYPTO_MODE_DERIVE      0x00000006
 #define CRYPTO_MODE_ILLEGAL     0x7FFFFFFF
 
+// Size
 #define AES_128_KEY_SIZE        16
 #define AES_192_KEY_SIZE        24
 #define AES_256_KEY_SIZE        32
+#define PLAIN_MAX_SIZE          1024
+#define CIPHER_MAX_SIZE         1024
+
 #define SHA256_HASH_SIZE        32
 #define SHA512_HASH_SIZE        64
 #define SHA_MAX_SIZE            64
@@ -38,5 +42,9 @@
 #define HKDF_SALT_MAX_SIZE      64
 #define HKDF_INFO_MAX_SIZE      128
 #define HKDF_OKM_MAX_SIZE       64
+
+#define GCM_IV_MAX_SIZE         12
+#define GCM_AAD_MAX_SIZE        128
+#define GCM_TAG_MAX_SIZE        16
 
 #endif // CRYPTO_TA_H
