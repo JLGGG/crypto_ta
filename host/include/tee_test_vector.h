@@ -15,16 +15,24 @@ typedef struct {
     uint16_t info_len;
     uint8_t expected_okm[HKDF_OKM_MAX_SIZE];
     uint16_t expected_okm_len;
-} hkdf_test_case_t;
+} HkdfTestCase_t;
 
 typedef struct {
     uint8_t aes_128_key[AES_128_KEY_SIZE];
     uint16_t key_len;
     uint8_t *message;
     uint8_t expected_cmac[AES_128_KEY_SIZE];
-} aes_cmac_test_case_t;
+} AesCmacTestCase_t;
 
-extern hkdf_test_case_t hkdf_test_case_01;
-extern aes_cmac_test_case_t cmac_test_case_01;
+typedef struct {
+    uint8_t sha_type;
+    uint8_t *message;
+    uint8_t expected_digest[SHA_MAX_SIZE];
+} ShaTestCase_t;
+
+extern HkdfTestCase_t hkdf_test_case_01;
+extern AesCmacTestCase_t cmac_test_case_01;
+extern ShaTestCase_t sha_test_case_01;
+extern ShaTestCase_t sha_test_case_02;
 
 #endif // TEE_TEST_VECTOR_H

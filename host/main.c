@@ -4,6 +4,15 @@
 
 #include "include/tee_test_vector.h"
 
+#define RESULT_PRINT(a, b)                  \
+    do {                                    \
+        if (b) {                            \
+            printf("[SUCCESS]: %s\n", (a)); \
+        } else {                            \
+            printf("[FAIL]: %s\n", (a));    \
+        }                                   \
+    } while(0)
+
 int main(int argc, char *argv[])
 {
     TEEC_Result res;
@@ -17,9 +26,8 @@ int main(int argc, char *argv[])
     uint8_t hash_sha256[SHA256_HASH_SIZE];
     uint8_t hash_sha512[SHA512_HASH_SIZE];
     uint8_t aes_cmac[AES_128_KEY_SIZE];
-    uint8_t aes_cmac_result = 0U;
     uint8_t hkdf_okm[HKDF_OKM_MAX_SIZE];
-    uint8_t hkdf_result = 0U;
+    uint8_t result = 0U;
 
     res = TEEC_InitializeContext(NULL, &ctx);
     if (res != TEEC_SUCCESS)
@@ -55,6 +63,21 @@ int main(int argc, char *argv[])
         goto cleanup_sess;
     }
 
+    for (int i=0; i<SHA256_HASH_SIZE; i++)
+    {
+        result |= hash_sha256[i] ^ sha_test_case_01.expected_digest[i];
+
+    }
+
+    if (!result)
+    {
+        RESULT_PRINT("SHA-256", 1);
+    }
+    else
+    {
+        RESULT_PRINT("SHA-256", 0);
+    }
+
     op.params[0].tmpref.buffer = input;
     op.params[0].tmpref.size = strlen(input);
     op.params[1].tmpref.buffer = hash_sha512;
@@ -67,20 +90,20 @@ int main(int argc, char *argv[])
         goto cleanup_sess;
     }
 
-    printf("Input: %s\n", input);
-    printf("SHA-256: ");
-    for (int i=0; i<32; i++)
+    result = 0;
+    for (int i=0; i<SHA512_HASH_SIZE; i++)
     {
-        printf("%02x", hash_sha256[i]);
+        result |= hash_sha512[i] ^ sha_test_case_02.expected_digest[i];
     }
-    printf("\n");
-
-    printf("SHA-512: ");
-    for (int i=0; i<64; i++)
+    
+    if (!result)
     {
-        printf("%02x", hash_sha512[i]);
+        RESULT_PRINT("SHA-512", 1);
     }
-    printf("\n");
+    else
+    {
+        RESULT_PRINT("SHA-512", 0);
+    }
 
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
@@ -123,19 +146,20 @@ int main(int argc, char *argv[])
         goto cleanup_sess;
     }
 
-    printf("AES-128-CMAC: ");
+    result = 0;
     for (int i=0; i<AES_128_KEY_SIZE; i++)
     {
-        aes_cmac_result |= aes_cmac[i] ^ cmac_test_case_01.expected_cmac[i];
+        result |= aes_cmac[i] ^ cmac_test_case_01.expected_cmac[i];
 
     }
-    if (!aes_cmac_result)
+
+    if (!result)
     {
-        printf("[SUCCESS]\n");
+        RESULT_PRINT("AES-CMAC", 1);
     }
     else
     {
-        printf("[FAIL]\n");
+        RESULT_PRINT("AES-CMAC", 0);
     }
 
     memset(&op, 0, sizeof(op));
@@ -162,18 +186,18 @@ int main(int argc, char *argv[])
         goto cleanup_sess;
     }
 
-    printf("HKDF-SHA256: ");
+    result = 0;
     for (int i=0; i<hkdf_test_case_01.expected_okm_len; i++)
     {
-        hkdf_result |= hkdf_okm[i] ^ hkdf_test_case_01.expected_okm[i];
+        result |= hkdf_okm[i] ^ hkdf_test_case_01.expected_okm[i];
     }
-    if (!hkdf_result)
+    if (!result)
     {
-        printf("[SUCCESS]\n");
+        RESULT_PRINT("HKDF", 1);
     }
     else
     {
-        printf("[FAIL]\n");
+        RESULT_PRINT("HKDF", 0);
     }
 
 cleanup_sess:
