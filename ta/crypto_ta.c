@@ -3,12 +3,23 @@
 #include <crypto_ta.h>
 #include <string.h>
 
-struct aes_cmac_algo {
+struct aes_cmac_session {
     uint32_t algo;
     uint32_t mode;
     uint32_t key_size;
-    TEE_OperationHandle op_handle;
     TEE_ObjectHandle key_handle;
+    TEE_OperationHandle op_handle;
+    // TEE_OperationHandle sign_op;
+    // TEE_OperationHandle verify_op;
+};
+
+struct aes_gcm_session {
+    uint32_t algo;
+    uint32_t mode;
+    uint32_t key_size;
+    TEE_ObjectHandle key_handle;
+    TEE_OperationHandle enc_op;
+    TEE_OperationHandle dec_op;
 };
 
 TEE_Result TA_CreateEntryPoint(void)
@@ -22,7 +33,7 @@ void TA_DestroyEntryPoint(void) {}
 TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **session)
 {
     (void)pt; (void)params;
-    struct aes_cmac_algo *sess = TEE_Malloc(sizeof(*sess), 0);
+    struct aes_cmac_session *sess = TEE_Malloc(sizeof(*sess), 0);
 
     if (!sess)
     {
@@ -41,7 +52,7 @@ TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **ses
 void TA_CloseSessionEntryPoint(void *session)
 {
     DMSG("Session %p: release session", session);
-    struct aes_cmac_algo *sess = session;
+    struct aes_cmac_session *sess = session;
 
     TEE_FreeTransientObject(sess->key_handle);
     TEE_FreeOperation(sess->op_handle);
@@ -110,7 +121,7 @@ static TEE_Result do_sha512(uint32_t pt, TEE_Param params[4])
 
 static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param params[4])
 {
-    struct aes_cmac_algo *sess = NULL;
+    struct aes_cmac_session *sess = NULL;
     TEE_Attribute attr = {0};
     TEE_Result res = TEE_ERROR_GENERIC;
     char *key = NULL;
@@ -193,7 +204,7 @@ err:
 
 static TEE_Result aes_cmac_op(void *session, uint32_t pt, TEE_Param params[4])
 {
-    struct aes_cmac_algo *sess = NULL;
+    struct aes_cmac_session *sess = NULL;
     TEE_Result res = TEE_ERROR_OUT_OF_MEMORY;
     void *message = NULL;
     size_t message_size = 0U;
@@ -383,6 +394,10 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         case CMD_AES_CMAC:
         {
             return aes_cmac_op(session, pt, params);
+        }
+        case CMD_AES_GCM:
+        {
+            // return aes_gcm_op(session, pt, params);
         }
         case CMD_HKDF_DERIVE:
         {
