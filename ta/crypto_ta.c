@@ -5,11 +5,9 @@
 
 typedef struct {
     uint32_t algo;
-    uint32_t mode;
     uint32_t key_size;
     TEE_ObjectHandle key_handle;
-    TEE_OperationHandle op_handle;
-} MyTeeSession;
+} TeeSession_t;
 
 TEE_Result TA_CreateEntryPoint(void)
 {
@@ -22,7 +20,7 @@ void TA_DestroyEntryPoint(void) {}
 TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **session)
 {
     (void)pt; (void)params;
-    MyTeeSession *sess = TEE_Malloc(sizeof(*sess), 0);
+    TeeSession_t *sess = TEE_Malloc(sizeof(*sess), 0);
 
     if (sess == NULL)
     {
@@ -30,7 +28,6 @@ TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **ses
     }
 
     sess->key_handle = TEE_HANDLE_NULL;
-    sess->op_handle = TEE_HANDLE_NULL;
 
     *session = sess;
     DMSG("Session %p: newly allocated", *session);
@@ -41,10 +38,9 @@ TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **ses
 void TA_CloseSessionEntryPoint(void *session)
 {
     DMSG("Session %p: release session", session);
-    MyTeeSession *sess = session;
+    TeeSession_t *sess = session;
 
     TEE_FreeTransientObject(sess->key_handle);
-    TEE_FreeOperation(sess->op_handle);
     TEE_Free(sess);
 }
 
@@ -110,18 +106,17 @@ static TEE_Result do_sha512(uint32_t pt, TEE_Param params[4])
 
 static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param params[4])
 {
-    MyTeeSession *sess = NULL;
+    TeeSession_t *sess = NULL;
     TEE_Attribute attr = {0};
     TEE_Result res = TEE_ERROR_GENERIC;
-    char *key = NULL;
     uint32_t tee_obj_type = TEE_TYPE_AES;
-    size_t key_size;
 
     const uint32_t exp_param_types = TEE_PARAM_TYPES(
-        TEE_PARAM_TYPE_VALUE_INPUT,
-        TEE_PARAM_TYPE_VALUE_INPUT,
-        TEE_PARAM_TYPE_VALUE_INPUT,
-        TEE_PARAM_TYPE_MEMREF_INPUT);
+        TEE_PARAM_TYPE_MEMREF_INPUT,    // Key
+        TEE_PARAM_TYPE_VALUE_INPUT,     // Algorithm
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
 
     DMSG("Session %p: get resources", session);
     sess = session;
@@ -131,29 +126,14 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         return TEE_ERROR_BAD_PARAMETERS;
     }
 
-    sess->algo = params[0].value.a;
-    sess->mode = params[1].value.a;
-    sess->key_size = params[2].value.a;
-
-    if (sess->op_handle != TEE_HANDLE_NULL)
-    {
-        TEE_FreeOperation(sess->op_handle);
-        sess->op_handle = TEE_HANDLE_NULL;
-    }
-
-    // maxKeySize: The fourth parameter is entered as a bit unit.
-    res = TEE_AllocateOperation(&sess->op_handle, sess->algo, sess->mode, sess->key_size * 8);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to allocate operation");
-        goto err;
-    }
-
     if (sess->key_handle != TEE_HANDLE_NULL)
     {
         TEE_FreeTransientObject(sess->key_handle);
         sess->key_handle = TEE_HANDLE_NULL;
     }
+
+    sess->key_size = params[0].memref.size;
+    sess->algo = params[1].value.a;
 
     // maxObjectSize: The second parameter is entered as a bit unit.
     res = TEE_AllocateTransientObject(tee_obj_type, sess->key_size * 8, &sess->key_handle);
@@ -163,9 +143,11 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         goto err;
     }
 
-    key = params[3].memref.buffer;
-    key_size = params[3].memref.size;
-    TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, key, key_size);
+    TEE_InitRefAttribute(&attr,
+        TEE_ATTR_SECRET_VALUE,
+        params[0].memref.buffer,
+        params[0].memref.size
+    );
     res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
     if (res != TEE_SUCCESS)
     {
@@ -173,19 +155,9 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         goto err;
     }
 
-    res = TEE_SetOperationKey(sess->op_handle, sess->key_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("TEE_SetOperationKey failed %d", res);
-        goto err;
-    }
-
     return TEE_SUCCESS;
 
 err:
-    TEE_FreeOperation(sess->op_handle);
-    sess->op_handle = TEE_HANDLE_NULL;
-
     TEE_FreeTransientObject(sess->key_handle);
     sess->key_handle = TEE_HANDLE_NULL;
 
@@ -194,7 +166,8 @@ err:
 
 static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[4])
 {
-    MyTeeSession *sess = NULL;
+    TeeSession_t *sess = NULL;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
     TEE_Result res = TEE_ERROR_OUT_OF_MEMORY;
     void *message = NULL;
     size_t message_size = 0U;
@@ -211,32 +184,46 @@ static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[
     DMSG("Session %p: cmac operation", session);
     sess = session;
 
-    if (sess->op_handle == TEE_HANDLE_NULL)
-    {
-        EMSG("Operation not properly initialized.");
-        return TEE_ERROR_BAD_STATE;
-    }
-
     if (pt != exp_pt)
     {
         return TEE_ERROR_BAD_PARAMETERS;
     }
 
+    if (sess->key_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Key handle not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    res = TEE_AllocateOperation(&op, sess->algo, CRYPTO_MODE_MAC, sess->key_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation");
+        goto out;
+    }
+
+    res = TEE_SetOperationKey(op, sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed %d", res);
+        goto out;
+    }
+
     message = params[0].memref.buffer;
     message_size = params[0].memref.size;
-    cmac_len = (uint32_t)params[1].memref.size;
+    cmac_len = params[1].memref.size;
 
     if (params[1].memref.buffer && params[1].memref.size)
     {
         temp_buffer = TEE_Malloc(params[1].memref.size, 0);
         if (temp_buffer == NULL)
         {
-            goto out;
+            goto free_buffer;
         }
     }
 
-    TEE_MACInit(sess->op_handle, NULL, 0);
-    res = TEE_MACComputeFinal(sess->op_handle, message, message_size, temp_buffer, &cmac_len);
+    TEE_MACInit(op, NULL, 0);
+    res = TEE_MACComputeFinal(op, message, message_size, temp_buffer, &cmac_len);
     if (res == TEE_SUCCESS)
     {
         TEE_MemMove(params[1].memref.buffer, temp_buffer, cmac_len);
@@ -244,14 +231,17 @@ static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[
 
     params[1].memref.size = cmac_len;
 
-out:
+free_buffer:
     TEE_Free(temp_buffer);
+out:
+    TEE_FreeOperation(op);
     return res;
 }
 
 static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param params[4])
 {
-    MyTeeSession *sess = NULL;
+    TeeSession_t *sess = NULL;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
     TEE_Result res = TEE_ERROR_OUT_OF_MEMORY;
     void *message = NULL;
     size_t message_size = 0U;
@@ -268,15 +258,29 @@ static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param param
     DMSG("Session %p: cmac operation", session);
     sess = session;
 
-    if (sess->op_handle == TEE_HANDLE_NULL)
-    {
-        EMSG("Operation not properly initialized.");
-        return TEE_ERROR_BAD_STATE;
-    }
-
     if (pt != exp_pt)
     {
         return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    if (sess->key_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Key handle not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    res = TEE_AllocateOperation(&op, sess->algo, CRYPTO_MODE_MAC, sess->key_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation");
+        goto out;
+    }
+
+    res = TEE_SetOperationKey(op, sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed %d", res);
+        goto out;
     }
 
     message = params[0].memref.buffer;
@@ -284,13 +288,24 @@ static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param param
     cmac = params[1].memref.buffer;
     cmac_len = params[1].memref.size;
 
-    TEE_MACInit(sess->op_handle, NULL, 0);
-    res = TEE_MACCompareFinal(sess->op_handle, message, message_size, cmac, cmac_len);
+    TEE_MACInit(op, NULL, 0);
+    res = TEE_MACCompareFinal(op, message, message_size, cmac, cmac_len);
     params[2].value.a = (res == TEE_SUCCESS);
 
 out:
+    TEE_FreeOperation(op);
     return res;
 }
+
+// static TEE_Result aes_gcm_enc_op(void *session, uint32_t pt, TEE_Param params[4])
+// {
+
+// }
+
+// static TEE_Result aes_gcm_dec_op(void *session, uint32_t pt, TEE_Param params[4])
+// {
+
+// }
 
 static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
 {

@@ -1,6 +1,8 @@
 #ifndef CRYPTO_TA_H
 #define CRYPTO_TA_H
 
+#include <stdint.h>
+
 // UUID in TA
 #define CRYPTO_TA_UUID \
     { 0x12345678, 0x1234, 0x1234, \
@@ -50,5 +52,15 @@
 #define GCM_IV_MAX_SIZE         12U
 #define GCM_AAD_MAX_SIZE        128U
 #define GCM_TAG_MAX_SIZE        16U
+
+// DSA
+typedef struct {
+    uint8_t *iv;
+    uint16_t iv_size;
+    uint8_t *aad;
+    uint16_t aad_size;
+    uint8_t *plaintext;
+    uint16_t plaintext_size;
+} TeeGcm_t;
 
 #endif // CRYPTO_TA_H

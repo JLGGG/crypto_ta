@@ -107,17 +107,15 @@ int main(int argc, char *argv[])
 
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
-        TEEC_VALUE_INPUT,
-        TEEC_VALUE_INPUT,
-        TEEC_VALUE_INPUT,
-        TEEC_MEMREF_TEMP_INPUT
+        TEEC_MEMREF_TEMP_INPUT, // Key
+        TEEC_VALUE_INPUT,       // Algorithm
+        TEEC_NONE,
+        TEEC_NONE
     );
 
-    op.params[0].value.a = CRYPTO_ALG_AES_CMAC;
-    op.params[1].value.a = CRYPTO_MODE_MAC;
-    op.params[2].value.a = cmac_test_case_01.key_len;
-    op.params[3].tmpref.buffer = cmac_test_case_01.aes_128_key;
-    op.params[3].tmpref.size = sizeof(cmac_test_case_01.aes_128_key);
+    op.params[0].tmpref.buffer = cmac_test_case_01.aes_128_key;
+    op.params[0].tmpref.size = sizeof(cmac_test_case_01.aes_128_key);
+    op.params[1].value.a = CRYPTO_ALG_AES_CMAC;
 
     res = TEEC_InvokeCommand(&sess, CMD_AES_PREPARE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
