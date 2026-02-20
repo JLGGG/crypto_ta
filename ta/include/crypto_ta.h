@@ -9,10 +9,12 @@
 // Commands
 #define CMD_SHA256              0U
 #define CMD_SHA512              1U
-#define CMD_AES_CMAC_PREPARE    2U
-#define CMD_AES_CMAC            3U
-#define CMD_AES_GCM             4U
-#define CMD_HKDF_DERIVE         5U
+#define CMD_AES_PREPARE         2U
+#define CMD_AES_CMAC_SIGN       3U
+#define CMD_AES_CMAC_VERIFY     4U
+#define CMD_AES_GCM_ENC         5U
+#define CMD_AES_GCM_DEC         6U
+#define CMD_HKDF_DERIVE         7U
 
 // Algorithm (from GlobalPlatform TEE Internal Core API)
 #define CRYPTO_ALG_AES_CMAC                 0x30000610U

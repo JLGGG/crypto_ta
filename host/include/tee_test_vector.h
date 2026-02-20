@@ -20,13 +20,13 @@ typedef struct {
 typedef struct {
     uint8_t aes_128_key[AES_128_KEY_SIZE];
     uint16_t key_len;
-    uint8_t *message;
+    char *message;
     uint8_t expected_cmac[AES_128_KEY_SIZE];
 } AesCmacTestVector_t;
 
 typedef struct {
     uint8_t sha_type;
-    uint8_t *message;
+    char *message;
     uint8_t expected_digest[SHA_MAX_SIZE];
 } ShaTestVector_t;
 

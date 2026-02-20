@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
     op.params[3].tmpref.buffer = cmac_test_case_01.aes_128_key;
     op.params[3].tmpref.size = sizeof(cmac_test_case_01.aes_128_key);
 
-    res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC_PREPARE, &op, &err_origin);
+    res = TEEC_InvokeCommand(&sess, CMD_AES_PREPARE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
         printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
@@ -139,7 +139,7 @@ int main(int argc, char *argv[])
     op.params[1].tmpref.buffer = aes_cmac;
     op.params[1].tmpref.size = sizeof(aes_cmac);
 
-    res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC, &op, &err_origin);
+    res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC_SIGN, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
         printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
@@ -155,11 +155,40 @@ int main(int argc, char *argv[])
 
     if (!result)
     {
-        RESULT_PRINT("AES-CMAC", 1);
+        RESULT_PRINT("AES-CMAC SIGN", 1);
     }
     else
     {
-        RESULT_PRINT("AES-CMAC", 0);
+        RESULT_PRINT("AES-CMAC SIGN", 0);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_VALUE_OUTPUT,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = input;
+    op.params[0].tmpref.size = strlen(input);
+    op.params[1].tmpref.buffer = aes_cmac;
+    op.params[1].tmpref.size = sizeof(aes_cmac);
+
+    res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC_VERIFY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    if (op.params[2].value.a == true)
+    {
+        RESULT_PRINT("AES_CMAC VERIFY", 1);
+    }
+    else
+    {
+        RESULT_PRINT("AES_CMAC VERIFY", 0);
     }
 
     memset(&op, 0, sizeof(op));

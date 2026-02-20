@@ -3,24 +3,13 @@
 #include <crypto_ta.h>
 #include <string.h>
 
-struct aes_cmac_session {
+typedef struct {
     uint32_t algo;
     uint32_t mode;
     uint32_t key_size;
     TEE_ObjectHandle key_handle;
     TEE_OperationHandle op_handle;
-    // TEE_OperationHandle sign_op;
-    // TEE_OperationHandle verify_op;
-};
-
-struct aes_gcm_session {
-    uint32_t algo;
-    uint32_t mode;
-    uint32_t key_size;
-    TEE_ObjectHandle key_handle;
-    TEE_OperationHandle enc_op;
-    TEE_OperationHandle dec_op;
-};
+} MyTeeSession;
 
 TEE_Result TA_CreateEntryPoint(void)
 {
@@ -33,9 +22,9 @@ void TA_DestroyEntryPoint(void) {}
 TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **session)
 {
     (void)pt; (void)params;
-    struct aes_cmac_session *sess = TEE_Malloc(sizeof(*sess), 0);
+    MyTeeSession *sess = TEE_Malloc(sizeof(*sess), 0);
 
-    if (!sess)
+    if (sess == NULL)
     {
         return TEE_ERROR_OUT_OF_MEMORY;
     }
@@ -52,7 +41,7 @@ TEE_Result TA_OpenSessionEntryPoint(uint32_t pt, TEE_Param params[4], void **ses
 void TA_CloseSessionEntryPoint(void *session)
 {
     DMSG("Session %p: release session", session);
-    struct aes_cmac_session *sess = session;
+    MyTeeSession *sess = session;
 
     TEE_FreeTransientObject(sess->key_handle);
     TEE_FreeOperation(sess->op_handle);
@@ -121,7 +110,7 @@ static TEE_Result do_sha512(uint32_t pt, TEE_Param params[4])
 
 static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param params[4])
 {
-    struct aes_cmac_session *sess = NULL;
+    MyTeeSession *sess = NULL;
     TEE_Attribute attr = {0};
     TEE_Result res = TEE_ERROR_GENERIC;
     char *key = NULL;
@@ -152,7 +141,7 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         sess->op_handle = TEE_HANDLE_NULL;
     }
 
-    // maxKeySize bits can be performed.
+    // maxKeySize: The fourth parameter is entered as a bit unit.
     res = TEE_AllocateOperation(&sess->op_handle, sess->algo, sess->mode, sess->key_size * 8);
     if (res != TEE_SUCCESS)
     {
@@ -166,6 +155,7 @@ static TEE_Result alloc_resources(void *session, uint32_t param_types, TEE_Param
         sess->key_handle = TEE_HANDLE_NULL;
     }
 
+    // maxObjectSize: The second parameter is entered as a bit unit.
     res = TEE_AllocateTransientObject(tee_obj_type, sess->key_size * 8, &sess->key_handle);
     if (res != TEE_SUCCESS)
     {
@@ -202,14 +192,14 @@ err:
     return res;
 }
 
-static TEE_Result aes_cmac_op(void *session, uint32_t pt, TEE_Param params[4])
+static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[4])
 {
-    struct aes_cmac_session *sess = NULL;
+    MyTeeSession *sess = NULL;
     TEE_Result res = TEE_ERROR_OUT_OF_MEMORY;
     void *message = NULL;
     size_t message_size = 0U;
     uint32_t cmac_len = 0U;
-    void *b2 = NULL;
+    void *temp_buffer = NULL;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
         TEE_PARAM_TYPE_MEMREF_INPUT,
@@ -238,24 +228,67 @@ static TEE_Result aes_cmac_op(void *session, uint32_t pt, TEE_Param params[4])
 
     if (params[1].memref.buffer && params[1].memref.size)
     {
-        b2 = TEE_Malloc(params[1].memref.size, 0);
-        if (!b2)
+        temp_buffer = TEE_Malloc(params[1].memref.size, 0);
+        if (temp_buffer == NULL)
         {
             goto out;
         }
     }
 
     TEE_MACInit(sess->op_handle, NULL, 0);
-    res = TEE_MACComputeFinal(sess->op_handle, message, message_size, b2, &cmac_len);
+    res = TEE_MACComputeFinal(sess->op_handle, message, message_size, temp_buffer, &cmac_len);
     if (res == TEE_SUCCESS)
     {
-        TEE_MemMove(params[1].memref.buffer, b2, cmac_len);
+        TEE_MemMove(params[1].memref.buffer, temp_buffer, cmac_len);
     }
 
     params[1].memref.size = cmac_len;
 
 out:
-    TEE_Free(b2);
+    TEE_Free(temp_buffer);
+    return res;
+}
+
+static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param params[4])
+{
+    MyTeeSession *sess = NULL;
+    TEE_Result res = TEE_ERROR_OUT_OF_MEMORY;
+    void *message = NULL;
+    size_t message_size = 0U;
+    void *cmac = NULL;
+    size_t cmac_len = 0U;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_VALUE_OUTPUT,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    DMSG("Session %p: cmac operation", session);
+    sess = session;
+
+    if (sess->op_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Operation not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    message = params[0].memref.buffer;
+    message_size = params[0].memref.size;
+    cmac = params[1].memref.buffer;
+    cmac_len = params[1].memref.size;
+
+    TEE_MACInit(sess->op_handle, NULL, 0);
+    res = TEE_MACCompareFinal(sess->op_handle, message, message_size, cmac, cmac_len);
+    params[2].value.a = (res == TEE_SUCCESS);
+
+out:
     return res;
 }
 
@@ -342,13 +375,13 @@ static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
         goto clean;
     }
 
-    if (salt && salt_size > 0)
+    if ((salt != NULL) && (salt_size > 0))
     {
         TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_SALT, salt, salt_size);
         attr_count++;
     }
 
-    if (info && info_size > 0)
+    if ((info != NULL) && (info_size > 0))
     {
         TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_INFO, info, info_size);
         attr_count++;
@@ -387,17 +420,25 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         {
             return do_sha512(pt, params);
         }
-        case CMD_AES_CMAC_PREPARE:
+        case CMD_AES_PREPARE:
         {
             return alloc_resources(session, pt, params);
         }
-        case CMD_AES_CMAC:
+        case CMD_AES_CMAC_SIGN:
         {
-            return aes_cmac_op(session, pt, params);
+            return aes_cmac_sign_op(session, pt, params);
         }
-        case CMD_AES_GCM:
+        case CMD_AES_CMAC_VERIFY:
         {
-            // return aes_gcm_op(session, pt, params);
+            return aes_cmac_verify_op(session, pt, params);
+        }
+        case CMD_AES_GCM_ENC:
+        {
+            // return aes_gcm_enc_op(session, pt, params);
+        }
+        case CMD_AES_GCM_DEC:
+        {
+            // return aes_gcm_dec_op(session, pt, params);
         }
         case CMD_HKDF_DERIVE:
         {
