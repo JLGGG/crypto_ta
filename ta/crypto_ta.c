@@ -195,7 +195,7 @@ static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[
         return TEE_ERROR_BAD_STATE;
     }
 
-    res = TEE_AllocateOperation(&op, sess->algo, CRYPTO_MODE_MAC, sess->key_size * 8);
+    res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_MAC, sess->key_size * 8);
     if (res != TEE_SUCCESS)
     {
         EMSG("Failed to allocate operation");
@@ -269,7 +269,7 @@ static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param param
         return TEE_ERROR_BAD_STATE;
     }
 
-    res = TEE_AllocateOperation(&op, sess->algo, CRYPTO_MODE_MAC, sess->key_size * 8);
+    res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_MAC, sess->key_size * 8);
     if (res != TEE_SUCCESS)
     {
         EMSG("Failed to allocate operation");
@@ -297,15 +297,190 @@ out:
     return res;
 }
 
-// static TEE_Result aes_gcm_enc_op(void *session, uint32_t pt, TEE_Param params[4])
-// {
+static TEE_Result aes_gcm_enc_op(void *session, uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TeeSession_t *sess = NULL;
+    TeeGcm_t *gcm_data = NULL;
+    void *ciphertext_temp_buffer = NULL;
+    void *tag_temp_buffer = NULL;
+    uint32_t ciphertext_len = 0U;
+    uint32_t tag_len = 0U;
 
-// }
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,  // GCM data structure
+        TEE_PARAM_TYPE_MEMREF_OUTPUT, // Ciphertext
+        TEE_PARAM_TYPE_MEMREF_OUTPUT, // Tag
+        TEE_PARAM_TYPE_NONE
+    );
 
-// static TEE_Result aes_gcm_dec_op(void *session, uint32_t pt, TEE_Param params[4])
-// {
+    DMSG("Session %p: AES-GCM encryption operation", session);
+    sess = session;
 
-// }
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    if (sess->key_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Key handle not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_ENCRYPT, sess->key_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation");
+        goto out;
+    }
+
+    res = TEE_SetOperationKey(op, sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed %d", res);
+        goto out;
+    }
+
+    gcm_data = params[0].memref.buffer;
+    ciphertext_len = params[1].memref.size;
+    tag_len = params[2].memref.size;
+
+    if ((params[1].memref.buffer && params[1].memref.size)
+        && (params[2].memref.buffer && params[2].memref.size))
+    {
+        ciphertext_temp_buffer = TEE_Malloc(params[1].memref.size, 0);
+        tag_temp_buffer = TEE_Malloc(params[2].memref.size, 0);
+        if ((ciphertext_temp_buffer == NULL) || (tag_temp_buffer == NULL))
+        {
+            goto free_buffer;
+        }
+    }
+
+    res = TEE_AEInit(op, gcm_data->iv, gcm_data->iv_len, tag_len * 8, gcm_data->aad_len, gcm_data->payload_len);
+    if (res == TEE_SUCCESS)
+    {
+        if (gcm_data->aad_len > 0)
+        {
+            (void)TEE_AEUpdateAAD(op, gcm_data->aad, gcm_data->aad_len);
+        }
+
+        res = TEE_AEEncryptFinal(
+            op,
+            gcm_data->payload, // Plaintext
+            gcm_data->payload_len,
+            ciphertext_temp_buffer,
+            &ciphertext_len,
+            tag_temp_buffer,
+            &tag_len);
+
+        if (res == TEE_SUCCESS)
+        {
+            (void)TEE_MemMove(params[1].memref.buffer, ciphertext_temp_buffer, ciphertext_len);
+            (void)TEE_MemMove(params[2].memref.buffer, tag_temp_buffer, tag_len);
+        }
+    }
+free_buffer:
+    (void)TEE_Free(ciphertext_temp_buffer);
+    (void)TEE_Free(tag_temp_buffer);
+out:
+    TEE_FreeOperation(op);
+    return res;
+}
+
+static TEE_Result aes_gcm_dec_op(void *session, uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TeeSession_t *sess = NULL;
+    TeeGcm_t *gcm_data = NULL;
+    void *plaintext_temp_buffer = NULL;
+    uint32_t plaintext_len = 0U;
+    void *tag = NULL;
+    uint32_t tag_len = 0U;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,    // GCM data structure
+        TEE_PARAM_TYPE_MEMREF_INPUT,    // Tag
+        TEE_PARAM_TYPE_MEMREF_OUTPUT,   // Plaintext
+        TEE_PARAM_TYPE_NONE
+    );
+
+    DMSG("Session %p: AES-GCM decryption operation", session);
+    sess = session;
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    if (sess->key_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Key handle not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_DECRYPT, sess->key_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation");
+        goto out;
+    }
+
+    res = TEE_SetOperationKey(op, sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed %d", res);
+        goto out;
+    }
+
+    gcm_data = params[0].memref.buffer;
+    tag = params[1].memref.buffer;
+    tag_len = params[1].memref.size;
+    plaintext_len = params[2].memref.size;
+
+    if ((params[2].memref.buffer) && (params[2].memref.size))
+    {
+        plaintext_temp_buffer = TEE_Malloc(params[2].memref.size, 0);
+        if (plaintext_temp_buffer == NULL)
+        {
+            goto free_buffer;
+        }
+    }
+
+    res = TEE_AEInit(op, gcm_data->iv, gcm_data->iv_len, tag_len * 8, gcm_data->aad_len, gcm_data->payload_len);
+    if (res == TEE_SUCCESS)
+    {
+        if (gcm_data->aad_len > 0)
+        {
+            (void)TEE_AEUpdateAAD(op, gcm_data->aad, gcm_data->aad_len);
+        }
+
+        res = TEE_AEDecryptFinal(
+            op,
+            gcm_data->payload, // Ciphertext
+            gcm_data->payload_len,
+            plaintext_temp_buffer,
+            &plaintext_len,
+            tag,
+            tag_len);
+
+        if (res == TEE_SUCCESS)
+        {
+            (void)TEE_MemMove(params[2].memref.buffer, plaintext_temp_buffer, plaintext_len);
+        }
+        else
+        {
+            res = TEE_ERROR_MAC_INVALID;
+        }
+    }
+free_buffer:
+    (void)TEE_Free(plaintext_temp_buffer);
+out:
+    TEE_FreeOperation(op);
+    return res;
+}
 
 static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
 {
@@ -449,11 +624,11 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         }
         case CMD_AES_GCM_ENC:
         {
-            // return aes_gcm_enc_op(session, pt, params);
+            return aes_gcm_enc_op(session, pt, params);
         }
         case CMD_AES_GCM_DEC:
         {
-            // return aes_gcm_dec_op(session, pt, params);
+            return aes_gcm_dec_op(session, pt, params);
         }
         case CMD_HKDF_DERIVE:
         {

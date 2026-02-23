@@ -23,16 +23,6 @@
 #define CRYPTO_ALG_AES_GCM                  0x40000810U
 #define CRYPTO_ALG_HKDF_SHA256_DERIVE_KEY   0x800040C0U
 
-// Mode
-#define CRYPTO_MODE_ENCRYPT     0x00000000U
-#define CRYPTO_MODE_DECRYPT     0x00000001U
-#define CRYPTO_MODE_SIGN        0x00000002U
-#define CRYPTO_MODE_VERIFY      0x00000003U
-#define CRYPTO_MODE_MAC         0x00000004U
-#define CRYPTO_MODE_DIGEST      0x00000005U
-#define CRYPTO_MODE_DERIVE      0x00000006U
-#define CRYPTO_MODE_ILLEGAL     0x7FFFFFFFU
-
 // Size
 #define AES_128_KEY_SIZE        16U
 #define AES_192_KEY_SIZE        24U
@@ -55,12 +45,12 @@
 
 // DSA
 typedef struct {
-    uint8_t *iv;
-    uint16_t iv_size;
-    uint8_t *aad;
-    uint16_t aad_size;
-    uint8_t *plaintext;
-    uint16_t plaintext_size;
+    uint8_t iv[GCM_IV_MAX_SIZE];
+    uint32_t iv_len;
+    uint8_t aad[GCM_AAD_MAX_SIZE];
+    uint32_t aad_len;
+    uint8_t payload[PLAIN_MAX_SIZE];
+    uint32_t payload_len;
 } TeeGcm_t;
 
 #endif // CRYPTO_TA_H
