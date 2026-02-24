@@ -227,6 +227,121 @@ int main(int argc, char *argv[])
         RESULT_PRINT("HKDF", 0);
     }
 
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // Key
+        TEEC_VALUE_INPUT,       // Algorithm
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = gcm_test_case_01.key;
+    op.params[0].tmpref.size = sizeof(gcm_test_case_01.key);
+    op.params[1].value.a = CRYPTO_ALG_AES_GCM;
+
+    res = TEEC_InvokeCommand(&sess, CMD_AES_PREPARE, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    
+    TeeGcm_t gcm_data = {0};
+    uint8_t gcm_buffer[1024];
+    uint8_t gcm_tag_buffer[16];
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // GCM structure
+        TEEC_MEMREF_TEMP_OUTPUT, // Ciphertext
+        TEEC_MEMREF_TEMP_OUTPUT, // Tag
+        TEEC_NONE
+    );
+
+    memcpy(gcm_data.iv, gcm_test_case_01.iv, gcm_test_case_01.iv_len);
+    gcm_data.iv_len = gcm_test_case_01.iv_len;
+
+    memcpy(gcm_data.aad, gcm_test_case_01.aad, gcm_test_case_01.aad_size);
+    gcm_data.aad_len = gcm_test_case_01.aad_size;
+
+    memcpy(gcm_data.payload, gcm_test_case_01.plain, gcm_test_case_01.plain_len);
+    gcm_data.payload_len = gcm_test_case_01.plain_len;
+
+    op.params[0].tmpref.buffer = &gcm_data;
+    op.params[0].tmpref.size = sizeof(gcm_data);
+    op.params[1].tmpref.buffer = gcm_buffer;
+    op.params[1].tmpref.size = sizeof(gcm_buffer);
+    op.params[2].tmpref.buffer = gcm_tag_buffer;
+    op.params[2].tmpref.size = sizeof(gcm_tag_buffer);
+
+    res = TEEC_InvokeCommand(&sess, CMD_AES_GCM_ENC, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    result = 0;
+    for (int i=0; i<gcm_test_case_01.cipher_len; i++)
+    {
+        result |= gcm_buffer[i] ^ gcm_test_case_01.cipher[i];
+    }
+
+    for (int i=0; i<gcm_test_case_01.tag_len; i++)
+    {
+        result |= gcm_tag_buffer[i] ^ gcm_test_case_01.tag[i];
+    }
+
+    if (!result)
+    {
+        RESULT_PRINT("AES-GCM Encryption", 1);
+    }
+    else
+    {
+        RESULT_PRINT("AES-GCM Encryption", 0);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // GCM structure
+        TEEC_MEMREF_TEMP_INPUT, // Tag
+        TEEC_MEMREF_TEMP_OUTPUT, // Plaintext
+        TEEC_NONE
+    );
+
+    memset(gcm_data.payload, 0, sizeof(gcm_data.payload));
+    memset(gcm_buffer, 0, sizeof(gcm_buffer));
+    memcpy(gcm_data.payload, gcm_test_case_01.cipher, gcm_test_case_01.cipher_len);
+
+    op.params[0].tmpref.buffer = &gcm_data;
+    op.params[0].tmpref.size = sizeof(gcm_data);
+    op.params[1].tmpref.buffer = gcm_tag_buffer;
+    op.params[1].tmpref.size = sizeof(gcm_tag_buffer);
+    op.params[2].tmpref.buffer = gcm_buffer;
+    op.params[2].tmpref.size = sizeof(gcm_buffer);
+
+    res = TEEC_InvokeCommand(&sess, CMD_AES_GCM_DEC, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    result = 0;
+    for (int i=0; i<gcm_test_case_01.plain_len; i++)
+    {
+        result |= gcm_buffer[i] ^ gcm_test_case_01.plain[i];
+    }
+
+    if (!result)
+    {
+        RESULT_PRINT("AES-GCM Decryption", 1);
+    }
+    else
+    {
+        RESULT_PRINT("AES-GCM Decryption", 0);
+    }
+
 cleanup_sess:
     TEEC_CloseSession(&sess);
 cleanup_ctx:

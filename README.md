@@ -6,6 +6,7 @@ Examples of Trusted Application in OP-TEE Crypto
 - SHA-256   
 - SHA-512   
 - AES-CMAC   
+- AES-GCM   
 - HKDF-SHA-256   
 
 ## How to build
