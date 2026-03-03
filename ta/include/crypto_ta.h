@@ -9,14 +9,20 @@
     { 0x12, 0x34, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc } }
 
 // Commands
-#define CMD_SHA256              0U
-#define CMD_SHA512              1U
-#define CMD_AES_PREPARE         2U
-#define CMD_AES_CMAC_SIGN       3U
-#define CMD_AES_CMAC_VERIFY     4U
-#define CMD_AES_GCM_ENC         5U
-#define CMD_AES_GCM_DEC         6U
-#define CMD_HKDF_DERIVE         7U
+typedef enum {
+    CMD_SHA256 = 0U,
+    CMD_SHA512,
+    CMD_AES_PREPARE,
+    CMD_AES_CMAC_SIGN,
+    CMD_AES_CMAC_VERIFY,
+    CMD_AES_GCM_ENC,
+    CMD_AES_GCM_DEC,
+    CMD_HKDF_DERIVE,
+    CMD_SS_KEY_WRITE,
+    CMD_SS_KEY_READ,
+    CMD_SS_KEY_DELETE,
+    CMD_COUNT
+} TeeCmd_t;
 
 // Algorithm (from GlobalPlatform TEE Internal Core API)
 #define CRYPTO_ALG_AES_CMAC                 0x30000610U

@@ -341,6 +341,97 @@ int tee_test_run(void)
         RESULT_PRINT("AES-GCM Decryption", 0);
     }
 
+    char *key_id = "master_key";
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // object id
+        TEEC_MEMREF_TEMP_INPUT, // key data
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = key_id;
+    op.params[0].tmpref.size = strlen(key_id);
+    op.params[1].tmpref.buffer = cmac_test_case_01.aes_128_key;
+    op.params[1].tmpref.size = cmac_test_case_01.key_len;
+
+    res = TEEC_InvokeCommand(&sess, CMD_SS_KEY_WRITE, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        RESULT_PRINT("Write Key to Secure Storage", 0);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("Write Key to Secure Storage", 1);
+    }
+
+    uint8_t key_buffer[AES_128_KEY_SIZE];
+
+    result = 0;
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // object id
+        TEEC_MEMREF_TEMP_OUTPUT, // Get key from TEE
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = key_id;
+    op.params[0].tmpref.size = strlen(key_id);
+    op.params[1].tmpref.buffer = key_buffer;
+    op.params[1].tmpref.size = sizeof(key_buffer);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SS_KEY_READ, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    for (int i=0; i<AES_128_KEY_SIZE; i++)
+    {
+        result |= key_buffer[i] ^ cmac_test_case_01.aes_128_key[i];
+    }
+
+    if (!result)
+    {
+        RESULT_PRINT("Read Key from Secure Storage", 1);
+    }
+    else
+    {
+        RESULT_PRINT("Read Key from Secure Storage", 0);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // object id
+        TEEC_VALUE_OUTPUT, // Get the result of the deletion from TEE
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = key_id;
+    op.params[0].tmpref.size = strlen(key_id);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SS_KEY_DELETE, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    if (!op.params[1].value.a)
+    {
+        RESULT_PRINT("Delete Key from Secure Storage", 1);
+    }
+    else
+    {
+        RESULT_PRINT("Delete Key from Secure Storage", 0);
+    }
+
 cleanup_sess:
     TEEC_CloseSession(&sess);
 cleanup_ctx:

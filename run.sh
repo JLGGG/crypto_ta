@@ -6,6 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OPTEE_DIR="$HOME/optee"
 EXAMPLE_NAME="crypto_ta"
 
+if [[ "$1" == "--run-only" ]]; then
+	echo "Start QEMU."
+	cd "$OPTEE_DIR/build"
+	make run-only
+	exit 0
+fi
+
 echo "================== Step 1: Copy to optee_examples =================="
 rm -rf "$OPTEE_DIR/optee_examples/$EXAMPLE_NAME"
 cp -r "$SCRIPT_DIR" "$OPTEE_DIR/optee_examples/$EXAMPLE_NAME"

@@ -199,14 +199,14 @@ static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[
     if (res != TEE_SUCCESS)
     {
         EMSG("Failed to allocate operation");
-        goto out;
+        goto exit;
     }
 
     res = TEE_SetOperationKey(op, sess->key_handle);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_SetOperationKey failed %d", res);
-        goto out;
+        goto exit;
     }
 
     message = params[0].memref.buffer;
@@ -233,7 +233,7 @@ static TEE_Result aes_cmac_sign_op(void *session, uint32_t pt, TEE_Param params[
 
 free_buffer:
     TEE_Free(temp_buffer);
-out:
+exit:
     TEE_FreeOperation(op);
     return res;
 }
@@ -273,14 +273,14 @@ static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param param
     if (res != TEE_SUCCESS)
     {
         EMSG("Failed to allocate operation");
-        goto out;
+        goto exit;
     }
 
     res = TEE_SetOperationKey(op, sess->key_handle);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_SetOperationKey failed %d", res);
-        goto out;
+        goto exit;
     }
 
     message = params[0].memref.buffer;
@@ -292,7 +292,7 @@ static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param param
     res = TEE_MACCompareFinal(op, message, message_size, cmac, cmac_len);
     params[2].value.a = (res == TEE_SUCCESS);
 
-out:
+exit:
     TEE_FreeOperation(op);
     return res;
 }
@@ -333,14 +333,14 @@ static TEE_Result aes_gcm_enc_op(void *session, uint32_t pt, TEE_Param params[4]
     if (res != TEE_SUCCESS)
     {
         EMSG("Failed to allocate operation");
-        goto out;
+        goto exit;
     }
 
     res = TEE_SetOperationKey(op, sess->key_handle);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_SetOperationKey failed %d", res);
-        goto out;
+        goto exit;
     }
 
     gcm_data = params[0].memref.buffer;
@@ -384,7 +384,7 @@ static TEE_Result aes_gcm_enc_op(void *session, uint32_t pt, TEE_Param params[4]
 free_buffer:
     (void)TEE_Free(ciphertext_temp_buffer);
     (void)TEE_Free(tag_temp_buffer);
-out:
+exit:
     TEE_FreeOperation(op);
     return res;
 }
@@ -425,14 +425,14 @@ static TEE_Result aes_gcm_dec_op(void *session, uint32_t pt, TEE_Param params[4]
     if (res != TEE_SUCCESS)
     {
         EMSG("Failed to allocate operation");
-        goto out;
+        goto exit;
     }
 
     res = TEE_SetOperationKey(op, sess->key_handle);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_SetOperationKey failed %d", res);
-        goto out;
+        goto exit;
     }
 
     gcm_data = params[0].memref.buffer;
@@ -477,7 +477,7 @@ static TEE_Result aes_gcm_dec_op(void *session, uint32_t pt, TEE_Param params[4]
     }
 free_buffer:
     (void)TEE_Free(plaintext_temp_buffer);
-out:
+exit:
     TEE_FreeOperation(op);
     return res;
 }
@@ -499,10 +499,10 @@ static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
     size_t info_size = 0U;
     uint32_t okm_size = 0U;
 
-    // params[0]: IKM (Input key Material) - MEMREF_INPUT
+    // params[0]: IKM  (Input key Material) - MEMREF_INPUT
     // params[1]: Salt (can be empty) - MEMREF_INPUT
     // params[2]: Info (can be empty) - MEMREF_INPUT
-    // params[3]: OKM (Output Key Material) - MEMREF_OUTPUT
+    // params[3]: OKM  (Output Key Material) - MEMREF_OUTPUT
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
         TEE_PARAM_TYPE_MEMREF_INPUT,
@@ -598,6 +598,217 @@ clean:
     return res;
 }
 
+static TEE_Result write_key_to_ss(uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_ObjectHandle object = TEE_HANDLE_NULL;
+    char *obj_id = NULL;
+    size_t obj_id_size = 0U;
+    char *key = NULL;
+    size_t key_size = 0U;
+    uint32_t flags;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Object ID
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Key data
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    // Copy Object Id to TEE mem
+    obj_id_size = params[0].memref.size;
+    obj_id = TEE_Malloc(obj_id_size, 0);
+    if (!obj_id)
+    {
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(obj_id, params[0].memref.buffer, obj_id_size);
+
+    // Copy Key to TEE mem
+    key_size = params[1].memref.size;
+    key = TEE_Malloc(key_size, 0);
+    if (!key)
+    {
+        TEE_Free(obj_id);
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(key, params[1].memref.buffer, key_size);
+
+    // Create persistent object
+    flags = TEE_DATA_FLAG_ACCESS_READ |
+            TEE_DATA_FLAG_ACCESS_WRITE |
+            TEE_DATA_FLAG_ACCESS_WRITE_META |
+            TEE_DATA_FLAG_OVERWRITE;
+
+    res = TEE_CreatePersistentObject(
+        TEE_STORAGE_PRIVATE,
+        obj_id, obj_id_size,
+        flags,
+        TEE_HANDLE_NULL,
+        NULL, 0,
+        &object
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_CreatePersistentObject failed: 0x%x", res);
+        TEE_Free(obj_id);
+        TEE_Free(key);
+        return res;
+    }
+
+    // Write data to object
+    res = TEE_WriteObjectData(object, key, key_size);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_WriteObjectData failed: 0x%x", res);
+        TEE_CloseAndDeletePersistentObject1(object);
+    }
+    else
+    {
+        TEE_CloseObject(object);
+    }
+
+    TEE_Free(obj_id);
+    TEE_Free(key);
+    return res;
+}
+
+static TEE_Result read_key_from_ss(uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_ObjectHandle object = TEE_HANDLE_NULL;
+    TEE_ObjectInfo object_info = {0};
+    char *obj_id = NULL;
+    size_t obj_id_size = 0U;
+    char *data = NULL;
+    size_t data_size = 0U;
+    uint32_t read_bytes = 0U;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Object Id
+        TEE_PARAM_TYPE_MEMREF_OUTPUT, // Get key from SS
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    obj_id_size = params[0].memref.size;
+    obj_id = TEE_Malloc(obj_id_size, 0);
+    if (!obj_id)
+    {
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(obj_id, params[0].memref.buffer, obj_id_size);
+
+    data_size = params[1].memref.size;
+    data = TEE_Malloc(data_size, 0);
+    if (!data)
+    {
+        TEE_Free(obj_id);
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        obj_id, obj_id_size,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_SHARE_READ,
+        &object
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        TEE_Free(obj_id);
+        TEE_Free(data);
+        return res;
+    }
+
+    res = TEE_GetObjectInfo1(object, &object_info);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_GetObjectInfo1 failed: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_ReadObjectData(object, data, object_info.dataSize, &read_bytes);
+    if (res == TEE_SUCCESS)
+    {
+        TEE_MemMove(params[1].memref.buffer, data, read_bytes);
+        params[1].memref.size = read_bytes;
+    }
+    else
+    {
+        EMSG("TEE_ReadObjectData failed: 0x%x", res);
+    }
+
+exit:
+    TEE_CloseObject(object);
+    TEE_Free(obj_id);
+    TEE_Free(data);
+    return res;
+}
+
+static TEE_Result delete_key_from_ss(uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_ObjectHandle object = TEE_HANDLE_NULL;
+    char *obj_id = NULL;
+    size_t obj_id_size = 0U;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Object Id
+        TEE_PARAM_TYPE_VALUE_OUTPUT, // the result of the deletion
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    obj_id_size = params[0].memref.size;
+    obj_id = TEE_Malloc(obj_id_size, 0);
+    if (!obj_id)
+    {
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(obj_id, params[0].memref.buffer, obj_id_size);
+
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        obj_id, obj_id_size,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_ACCESS_WRITE_META,
+        &object
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        params[1].value.a = TEE_ERROR_STORAGE_NOT_AVAILABLE;
+        goto exit;
+    }
+    else
+    {
+        params[1].value.a = TEE_SUCCESS;
+    }
+
+    TEE_CloseAndDeletePersistentObject1(object);
+exit:
+    TEE_Free(obj_id);
+    return res;
+}
+
 TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, TEE_Param params[4])
 {
     switch(cmd)
@@ -633,6 +844,18 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         case CMD_HKDF_DERIVE:
         {
             return do_hkdf_derive(pt, params);
+        }
+        case CMD_SS_KEY_WRITE:
+        {
+            return write_key_to_ss(pt, params);
+        }
+        case CMD_SS_KEY_READ:
+        {
+            return read_key_from_ss(pt, params);
+        }
+        case CMD_SS_KEY_DELETE:
+        {
+            return delete_key_from_ss(pt, params);
         }
         default:
         {
