@@ -609,7 +609,7 @@ static TEE_Result write_key_to_ss(uint32_t pt, TEE_Param params[4])
     uint32_t flags;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
-        TEE_PARAM_TYPE_MEMREF_INPUT, // Object ID
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Key ID
         TEE_PARAM_TYPE_MEMREF_INPUT, // Key data
         TEE_PARAM_TYPE_NONE,
         TEE_PARAM_TYPE_NONE
@@ -620,7 +620,7 @@ static TEE_Result write_key_to_ss(uint32_t pt, TEE_Param params[4])
         return TEE_ERROR_BAD_PARAMETERS;
     }
 
-    // Copy Object Id to TEE mem
+    // Copy Key Id to TEE mem
     obj_id_size = params[0].memref.size;
     obj_id = TEE_Malloc(obj_id_size, 0);
     if (!obj_id)
@@ -691,7 +691,7 @@ static TEE_Result read_key_from_ss(uint32_t pt, TEE_Param params[4])
     uint32_t read_bytes = 0U;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
-        TEE_PARAM_TYPE_MEMREF_INPUT, // Object Id
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Key Id
         TEE_PARAM_TYPE_MEMREF_OUTPUT, // Get key from SS
         TEE_PARAM_TYPE_NONE,
         TEE_PARAM_TYPE_NONE
@@ -766,7 +766,7 @@ static TEE_Result delete_key_from_ss(uint32_t pt, TEE_Param params[4])
     size_t obj_id_size = 0U;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
-        TEE_PARAM_TYPE_MEMREF_INPUT, // Object Id
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Key Id
         TEE_PARAM_TYPE_VALUE_OUTPUT, // the result of the deletion
         TEE_PARAM_TYPE_NONE,
         TEE_PARAM_TYPE_NONE
@@ -807,6 +807,233 @@ static TEE_Result delete_key_from_ss(uint32_t pt, TEE_Param params[4])
 exit:
     TEE_Free(obj_id);
     return res;
+}
+
+static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TEE_ObjectHandle obj = TEE_HANDLE_NULL;
+    TEE_ObjectHandle ikm_handle = TEE_HANDLE_NULL;
+    TEE_ObjectHandle okm_handle = TEE_HANDLE_NULL;
+    TEE_ObjectInfo obj_info = {0};
+    TEE_Attribute attrs[3];
+    TEE_Attribute attr;
+    uint32_t attr_count = 0U;
+    TeeSession_t *sess = NULL;
+    char *obj_id = NULL;
+    size_t obj_id_sz = 0U;
+    char *salt = NULL;
+    size_t salt_sz = 0U;
+    char *info = NULL;
+    size_t info_sz = 0U;
+    uint8_t *ikm = NULL;
+    size_t ikm_sz = 0U;
+    uint8_t *okm = NULL;
+    size_t okm_sz = 0U;
+    uint32_t read_bytes = 0U;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Object Id
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Salt
+        TEE_PARAM_TYPE_MEMREF_INPUT, // Info
+        TEE_PARAM_TYPE_NONE
+    );
+
+    DMSG("Session %p: SecOC init operation", session);
+    sess = (TeeSession_t *)session;
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    if (sess->key_handle != TEE_HANDLE_NULL)
+    {
+        TEE_FreeTransientObject(sess->key_handle);
+        sess->key_handle = TEE_HANDLE_NULL;
+    }
+
+    obj_id_sz = params[0].memref.size;
+    salt_sz = params[1].memref.size;
+    info_sz = params[2].memref.size;
+    ikm_sz = AES_128_KEY_SIZE;
+    okm_sz = AES_128_KEY_SIZE;
+
+    obj_id = TEE_Malloc(obj_id_sz, 0);
+    if (!obj_id)
+    {
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(obj_id, params[0].memref.buffer, obj_id_sz);
+
+    if (salt_sz > 0)
+    {
+        salt = TEE_Malloc(salt_sz, 0);
+        if (!salt)
+        {
+            res = TEE_ERROR_OUT_OF_MEMORY;
+            goto free_mem;
+        }
+        TEE_MemMove(salt, params[1].memref.buffer, salt_sz);
+    }
+
+    if (info_sz > 0)
+    {
+        info = TEE_Malloc(info_sz, 0);
+        if (!info)
+        {
+            res = TEE_ERROR_OUT_OF_MEMORY;
+            goto free_mem;
+        }
+        TEE_MemMove(info, params[2].memref.buffer, info_sz);
+    }
+
+    ikm = TEE_Malloc(ikm_sz, 0);
+    okm = TEE_Malloc(okm_sz, 0);
+    if (!ikm || !okm)
+    {
+        res = TEE_ERROR_OUT_OF_MEMORY;
+        goto free_mem;
+    }
+
+    // Load IKM from Secure Storage
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        obj_id, obj_id_sz,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_SHARE_READ,
+        &obj
+    );
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        goto free_mem;
+    }
+
+    res = TEE_GetObjectInfo1(obj, &obj_info);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_GetObjectInfo1 failed: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_ReadObjectData(obj, ikm, obj_info.dataSize, &read_bytes);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_ReadObjectData failed: 0x%x", res);
+        goto exit;
+    }
+
+    // Derive Key in HKDF process
+    res = TEE_AllocateTransientObject(TEE_TYPE_HKDF_IKM, ikm_sz * 8, &ikm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate IKM object: 0x%x", res);
+        goto exit;
+    }
+
+    TEE_InitRefAttribute(&attrs[0], TEE_ATTR_HKDF_IKM, ikm, ikm_sz);
+    res = TEE_PopulateTransientObject(ikm_handle, &attrs[0], 1);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to populate IKM: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_AllocateOperation(&op, TEE_ALG_HKDF_SHA256_DERIVE_KEY, TEE_MODE_DERIVE, ikm_sz * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_SetOperationKey(op, ikm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to set operation key: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_GENERIC_SECRET, okm_sz * 8, &okm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate OKM object: 0x%x", res);
+        goto exit;
+    }
+
+    attr_count = 0;
+    if (salt && salt_sz > 0)
+    {
+        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_SALT, salt, salt_sz);
+        attr_count++;
+    }
+
+    if (info && info_sz > 0)
+    {
+        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_INFO, info, info_sz);
+        attr_count++;
+    }
+
+    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, okm_sz, 0);
+    attr_count++;
+
+    res = TEE_DeriveKey(op, attrs, attr_count, okm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_DeriveKey failed: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, okm, &okm_sz);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to get OKM: 0x%x", res);
+        goto exit;
+    }
+
+    sess->key_size = AES_128_KEY_SIZE;
+    sess->algo = TEE_ALG_AES_CMAC;
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_AES, sess->key_size * 8, &sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate session key object: 0x%x", res);
+        goto exit;
+    }
+
+    TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, okm, okm_sz);
+    res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_PopulateTransientObject failed: 0x%x", res);
+        TEE_FreeTransientObject(sess->key_handle);
+        sess->key_handle = TEE_HANDLE_NULL;
+    }
+
+exit:
+    TEE_CloseObject(obj);
+    TEE_FreeOperation(op);
+    TEE_FreeTransientObject(ikm_handle);
+    TEE_FreeTransientObject(okm_handle);
+
+free_mem:
+    TEE_Free(obj_id);
+    TEE_Free(salt);
+    TEE_Free(info);
+    TEE_Free(ikm);
+    TEE_Free(okm);
+
+    return res;
+}
+
+static TEE_Result secoc_sign(uint32_t pt, TEE_Param params[4])
+{
+
+}
+
+static TEE_Result secoc_verify(uint32_t pt, TEE_Param params[4])
+{
+
 }
 
 TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, TEE_Param params[4])
@@ -856,6 +1083,18 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         case CMD_SS_KEY_DELETE:
         {
             return delete_key_from_ss(pt, params);
+        }
+        case CMD_SECOC_INIT:
+        {
+            return secoc_init(session, pt, params);
+        }
+        case CMD_SECOC_SIGN:
+        {
+            return secoc_sign(session, pt, params);
+        }
+        case CMD_SECOC_VERIFY:
+        {
+            return secoc_verify(session, pt, params);
         }
         default:
         {

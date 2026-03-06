@@ -341,11 +341,11 @@ int tee_test_run(void)
         RESULT_PRINT("AES-GCM Decryption", 0);
     }
 
-    char *key_id = "master_key";
+    char *key_id = SECOC_KEY_ID;
 
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
-        TEEC_MEMREF_TEMP_INPUT, // object id
+        TEEC_MEMREF_TEMP_INPUT, // key id
         TEEC_MEMREF_TEMP_INPUT, // key data
         TEEC_NONE,
         TEEC_NONE
@@ -373,7 +373,7 @@ int tee_test_run(void)
     result = 0;
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
-        TEEC_MEMREF_TEMP_INPUT, // object id
+        TEEC_MEMREF_TEMP_INPUT, // key id
         TEEC_MEMREF_TEMP_OUTPUT, // Get key from TEE
         TEEC_NONE,
         TEEC_NONE
@@ -407,7 +407,7 @@ int tee_test_run(void)
 
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
-        TEEC_MEMREF_TEMP_INPUT, // object id
+        TEEC_MEMREF_TEMP_INPUT, // key id
         TEEC_VALUE_OUTPUT, // Get the result of the deletion from TEE
         TEEC_NONE,
         TEEC_NONE
