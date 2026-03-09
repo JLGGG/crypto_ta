@@ -830,7 +830,7 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
     uint8_t *ikm = NULL;
     size_t ikm_sz = 0U;
     uint8_t *okm = NULL;
-    size_t okm_sz = 0U;
+    uint32_t okm_sz = 0U;
     uint32_t read_bytes = 0U;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
@@ -977,12 +977,7 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
     TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, okm_sz, 0);
     attr_count++;
 
-    res = TEE_DeriveKey(op, attrs, attr_count, okm_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("TEE_DeriveKey failed: 0x%x", res);
-        goto exit;
-    }
+    (void)TEE_DeriveKey(op, attrs, attr_count, okm_handle);
 
     res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, okm, &okm_sz);
     if (res != TEE_SUCCESS)
@@ -1026,14 +1021,135 @@ free_mem:
     return res;
 }
 
-static TEE_Result secoc_sign(uint32_t pt, TEE_Param params[4])
+static TEE_Result secoc_sign(void *session, uint32_t pt, TEE_Param params[4])
 {
+    TEE_Result res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TeeSession_t *sess = NULL;
+    void *temp_buffer = NULL;
+    uint32_t mac_len = 0U;
 
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // message
+        TEE_PARAM_TYPE_MEMREF_OUTPUT, // mac
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    DMSG("Session %p: SecOC sign operation", session);
+    sess = (TeeSession_t *)session;
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    if (sess->key_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Key handle not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_MAC, sess->key_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation");
+        goto exit;
+    }
+
+    res = TEE_SetOperationKey(op, sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed %d", res);
+        goto exit;
+    }
+
+    mac_len = params[1].memref.size;
+    if (params[1].memref.buffer && params[1].memref.size)
+    {
+        temp_buffer = TEE_Malloc(params[1].memref.size, 0);
+        if (temp_buffer == NULL)
+        {
+            res = TEE_ERROR_OUT_OF_MEMORY;
+            goto exit;
+        }
+    }
+
+    TEE_MACInit(op, NULL, 0);
+    res = TEE_MACComputeFinal(
+        op,
+        params[0].memref.buffer,
+        params[0].memref.size,
+        temp_buffer,
+        &mac_len
+    );
+
+    if (res == TEE_SUCCESS)
+    {
+        TEE_MemMove(params[1].memref.buffer, temp_buffer, mac_len);
+        params[1].memref.size = mac_len;
+    }
+
+    TEE_Free(temp_buffer);
+exit:
+    TEE_FreeOperation(op);
+    return res;
 }
 
-static TEE_Result secoc_verify(uint32_t pt, TEE_Param params[4])
+static TEE_Result secoc_verify(void *session, uint32_t pt, TEE_Param params[4])
 {
+    TEE_Result res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TeeSession_t *sess = NULL;
 
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // message
+        TEE_PARAM_TYPE_MEMREF_INPUT, // mac
+        TEE_PARAM_TYPE_VALUE_OUTPUT,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    DMSG("Session %p: cmac operation", session);
+    sess = (TeeSession_t *)session;
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    if (sess->key_handle == TEE_HANDLE_NULL)
+    {
+        EMSG("Key handle not properly initialized.");
+        return TEE_ERROR_BAD_STATE;
+    }
+
+    res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_MAC, sess->key_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation");
+        goto exit;
+    }
+
+    res = TEE_SetOperationKey(op, sess->key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed %d", res);
+        goto exit;
+    }
+
+    TEE_MACInit(op, NULL, 0);
+    res = TEE_MACCompareFinal(
+        op,
+        params[0].memref.buffer,
+        params[0].memref.size,
+        params[1].memref.buffer,
+        params[1].memref.size
+    );
+    params[2].value.a = (res == TEE_SUCCESS);
+
+exit:
+    TEE_FreeOperation(op);
+    return res;
 }
 
 TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, TEE_Param params[4])
