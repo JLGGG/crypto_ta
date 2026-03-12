@@ -289,8 +289,9 @@ static TEE_Result aes_cmac_verify_op(void *session, uint32_t pt, TEE_Param param
     cmac_len = params[1].memref.size;
 
     TEE_MACInit(op, NULL, 0);
-    res = TEE_MACCompareFinal(op, message, message_size, cmac, cmac_len);
-    params[2].value.a = (res == TEE_SUCCESS);
+    TEE_Result cmp_res = TEE_MACCompareFinal(op, message, message_size, cmac, cmac_len);
+    params[2].value.a = (cmp_res == TEE_SUCCESS);
+    res = TEE_SUCCESS;
 
 exit:
     TEE_FreeOperation(op);
@@ -482,7 +483,15 @@ exit:
     return res;
 }
 
-static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
+static TEE_Result hkdf_derive_internal(
+    void *ikm,
+    size_t ikm_size,
+    void *salt,
+    size_t salt_size,
+    void *info,
+    size_t info_size,
+    void *okm,
+    uint32_t *okm_size)
 {
     TEE_Result res;
     TEE_OperationHandle op = TEE_HANDLE_NULL;
@@ -490,6 +499,75 @@ static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
     TEE_ObjectHandle okm_handle = TEE_HANDLE_NULL;
     TEE_Attribute attrs[3];
     uint32_t attr_count = 0U;
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_HKDF_IKM, ikm_size * 8, &ikm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate IKM object: 0x%x", res);
+        goto clean;
+    }
+
+    TEE_InitRefAttribute(&attrs[0], TEE_ATTR_HKDF_IKM, ikm, ikm_size);
+    res = TEE_PopulateTransientObject(ikm_handle, &attrs[0], 1);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to populate IKM: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AllocateOperation(&op, TEE_ALG_HKDF_SHA256_DERIVE_KEY, TEE_MODE_DERIVE, ikm_size * 8);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_SetOperationKey(op, ikm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to set operation key: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_GENERIC_SECRET, *okm_size * 8, &okm_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate OKM object: 0x%x", res);
+        goto clean;
+    }
+
+    if ((salt != NULL) && (salt_size > 0))
+    {
+        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_SALT, salt, salt_size);
+        attr_count++;
+    }
+
+    if ((info != NULL) && (info_size > 0))
+    {
+        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_INFO, info, info_size);
+        attr_count++;
+    }
+    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, *okm_size, 0);
+    attr_count++;
+
+    (void)TEE_DeriveKey(op, attrs, attr_count, okm_handle);
+
+    res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, okm, okm_size);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to get OKM: 0x%x", res);
+    }
+
+clean:
+    TEE_FreeOperation(op);
+    TEE_FreeTransientObject(ikm_handle);
+    TEE_FreeTransientObject(okm_handle);
+    return res;
+}
+
+static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
 
     void *ikm = NULL;
     size_t ikm_size = 0U;
@@ -529,72 +607,18 @@ static TEE_Result do_hkdf_derive(uint32_t pt, TEE_Param params[4])
         return TEE_ERROR_BAD_PARAMETERS;
     }
 
-    res = TEE_AllocateTransientObject(TEE_TYPE_HKDF_IKM, ikm_size * 8, &ikm_handle);
-    if (res != TEE_SUCCESS)
+    res = hkdf_derive_internal(ikm, ikm_size,
+        salt, salt_size,
+        info, info_size,
+        params[3].memref.buffer, &okm_size
+    );
+
+    if (res == TEE_SUCCESS)
     {
-        EMSG("Failed to allocate IKM object: 0x%x", res);
-        goto clean;
+        params[3].memref.size = okm_size;
+        DMSG("HKDF derived %u bytes", okm_size);
     }
 
-    TEE_InitRefAttribute(&attrs[0], TEE_ATTR_HKDF_IKM, ikm, ikm_size);
-    res = TEE_PopulateTransientObject(ikm_handle, &attrs[0], 1);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to populate IKM: 0x%x", res);
-        goto clean;
-    }
-
-    res = TEE_AllocateOperation(&op, TEE_ALG_HKDF_SHA256_DERIVE_KEY, TEE_MODE_DERIVE, ikm_size * 8);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to allocate operation: 0x%x", res);
-        goto clean;
-    }
-
-    res = TEE_SetOperationKey(op, ikm_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to set operation key: 0x%x", res);
-        goto clean;
-    }
-
-    res = TEE_AllocateTransientObject(TEE_TYPE_GENERIC_SECRET, okm_size * 8, &okm_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to allocate OKM object: 0x%x", res);
-        goto clean;
-    }
-
-    if ((salt != NULL) && (salt_size > 0))
-    {
-        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_SALT, salt, salt_size);
-        attr_count++;
-    }
-
-    if ((info != NULL) && (info_size > 0))
-    {
-        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_INFO, info, info_size);
-        attr_count++;
-    }
-    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, okm_size, 0);
-    attr_count++;
-
-    (void)TEE_DeriveKey(op, attrs, attr_count, okm_handle);
-
-    res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, params[3].memref.buffer, &okm_size);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to get OKM: 0x%x", res);
-        goto clean;
-    }
-
-    params[3].memref.size = okm_size;
-    DMSG("HKDF derived %u bytes", okm_size);
-
-clean:
-    TEE_FreeOperation(op);
-    TEE_FreeTransientObject(ikm_handle);
-    TEE_FreeTransientObject(okm_handle);
     return res;
 }
 
@@ -812,14 +836,9 @@ exit:
 static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
 {
     TEE_Result res;
-    TEE_OperationHandle op = TEE_HANDLE_NULL;
     TEE_ObjectHandle obj = TEE_HANDLE_NULL;
-    TEE_ObjectHandle ikm_handle = TEE_HANDLE_NULL;
-    TEE_ObjectHandle okm_handle = TEE_HANDLE_NULL;
     TEE_ObjectInfo obj_info = {0};
-    TEE_Attribute attrs[3];
     TEE_Attribute attr;
-    uint32_t attr_count = 0U;
     TeeSession_t *sess = NULL;
     char *obj_id = NULL;
     size_t obj_id_sz = 0U;
@@ -873,7 +892,7 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
         if (!salt)
         {
             res = TEE_ERROR_OUT_OF_MEMORY;
-            goto free_mem;
+            goto exit;
         }
         TEE_MemMove(salt, params[1].memref.buffer, salt_sz);
     }
@@ -884,7 +903,7 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
         if (!info)
         {
             res = TEE_ERROR_OUT_OF_MEMORY;
-            goto free_mem;
+            goto exit;
         }
         TEE_MemMove(info, params[2].memref.buffer, info_sz);
     }
@@ -894,7 +913,7 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
     if (!ikm || !okm)
     {
         res = TEE_ERROR_OUT_OF_MEMORY;
-        goto free_mem;
+        goto exit;
     }
 
     // Load IKM from Secure Storage
@@ -907,7 +926,7 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
-        goto free_mem;
+        goto exit;
     }
 
     res = TEE_GetObjectInfo1(obj, &obj_info);
@@ -924,94 +943,36 @@ static TEE_Result secoc_init(void *session, uint32_t pt, TEE_Param params[4])
         goto exit;
     }
 
-    // Derive Key in HKDF process
-    res = TEE_AllocateTransientObject(TEE_TYPE_HKDF_IKM, ikm_sz * 8, &ikm_handle);
-    if (res != TEE_SUCCESS)
+    res = hkdf_derive_internal(ikm, ikm_sz,
+        salt, salt_sz,
+        info, info_sz,
+        okm, &okm_sz
+    );
+
+    if (res == TEE_SUCCESS)
     {
-        EMSG("Failed to allocate IKM object: 0x%x", res);
-        goto exit;
-    }
+        sess->key_size = AES_128_KEY_SIZE;
+        sess->algo = TEE_ALG_AES_CMAC;
 
-    TEE_InitRefAttribute(&attrs[0], TEE_ATTR_HKDF_IKM, ikm, ikm_sz);
-    res = TEE_PopulateTransientObject(ikm_handle, &attrs[0], 1);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to populate IKM: 0x%x", res);
-        goto exit;
-    }
+        res = TEE_AllocateTransientObject(TEE_TYPE_AES, sess->key_size * 8, &sess->key_handle);
+        if (res != TEE_SUCCESS)
+        {
+            EMSG("Failed to allocate session key object: 0x%x", res);
+            goto exit;
+        }
 
-    res = TEE_AllocateOperation(&op, TEE_ALG_HKDF_SHA256_DERIVE_KEY, TEE_MODE_DERIVE, ikm_sz * 8);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to allocate operation: 0x%x", res);
-        goto exit;
-    }
-
-    res = TEE_SetOperationKey(op, ikm_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to set operation key: 0x%x", res);
-        goto exit;
-    }
-
-    res = TEE_AllocateTransientObject(TEE_TYPE_GENERIC_SECRET, okm_sz * 8, &okm_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to allocate OKM object: 0x%x", res);
-        goto exit;
-    }
-
-    attr_count = 0;
-    if (salt && salt_sz > 0)
-    {
-        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_SALT, salt, salt_sz);
-        attr_count++;
-    }
-
-    if (info && info_sz > 0)
-    {
-        TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_HKDF_INFO, info, info_sz);
-        attr_count++;
-    }
-
-    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_HKDF_OKM_LENGTH, okm_sz, 0);
-    attr_count++;
-
-    (void)TEE_DeriveKey(op, attrs, attr_count, okm_handle);
-
-    res = TEE_GetObjectBufferAttribute(okm_handle, TEE_ATTR_SECRET_VALUE, okm, &okm_sz);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to get OKM: 0x%x", res);
-        goto exit;
-    }
-
-    sess->key_size = AES_128_KEY_SIZE;
-    sess->algo = TEE_ALG_AES_CMAC;
-
-    res = TEE_AllocateTransientObject(TEE_TYPE_AES, sess->key_size * 8, &sess->key_handle);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("Failed to allocate session key object: 0x%x", res);
-        goto exit;
-    }
-
-    TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, okm, okm_sz);
-    res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
-    if (res != TEE_SUCCESS)
-    {
-        EMSG("TEE_PopulateTransientObject failed: 0x%x", res);
-        TEE_FreeTransientObject(sess->key_handle);
-        sess->key_handle = TEE_HANDLE_NULL;
+        TEE_InitRefAttribute(&attr, TEE_ATTR_SECRET_VALUE, okm, okm_sz);
+        res = TEE_PopulateTransientObject(sess->key_handle, &attr, 1);
+        if (res != TEE_SUCCESS)
+        {
+            EMSG("TEE_PopulateTransientObject failed: 0x%x", res);
+            TEE_FreeTransientObject(sess->key_handle);
+            sess->key_handle = TEE_HANDLE_NULL;
+        }
     }
 
 exit:
     TEE_CloseObject(obj);
-    TEE_FreeOperation(op);
-    TEE_FreeTransientObject(ikm_handle);
-    TEE_FreeTransientObject(okm_handle);
-
-free_mem:
     TEE_Free(obj_id);
     TEE_Free(salt);
     TEE_Free(info);
@@ -1026,8 +987,10 @@ static TEE_Result secoc_sign(void *session, uint32_t pt, TEE_Param params[4])
     TEE_Result res;
     TEE_OperationHandle op = TEE_HANDLE_NULL;
     TeeSession_t *sess = NULL;
-    void *temp_buffer = NULL;
-    uint32_t mac_len = 0U;
+    void *msg = NULL;
+    size_t msg_sz = 0U;
+    void *mac = NULL;
+    uint32_t mac_sz = 0U;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
         TEE_PARAM_TYPE_MEMREF_INPUT, // message
@@ -1050,6 +1013,18 @@ static TEE_Result secoc_sign(void *session, uint32_t pt, TEE_Param params[4])
         return TEE_ERROR_BAD_STATE;
     }
 
+    msg_sz = params[0].memref.size;
+    mac_sz = params[1].memref.size;
+
+    msg = TEE_Malloc(msg_sz, 0);
+    mac = TEE_Malloc(mac_sz, 0);
+    if (!msg || !mac)
+    {
+        res = TEE_ERROR_OUT_OF_MEMORY;
+        goto exit;
+    }
+    TEE_MemMove(msg, params[0].memref.buffer, msg_sz);
+
     res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_MAC, sess->key_size * 8);
     if (res != TEE_SUCCESS)
     {
@@ -1064,35 +1039,23 @@ static TEE_Result secoc_sign(void *session, uint32_t pt, TEE_Param params[4])
         goto exit;
     }
 
-    mac_len = params[1].memref.size;
-    if (params[1].memref.buffer && params[1].memref.size)
-    {
-        temp_buffer = TEE_Malloc(params[1].memref.size, 0);
-        if (temp_buffer == NULL)
-        {
-            res = TEE_ERROR_OUT_OF_MEMORY;
-            goto exit;
-        }
-    }
-
     TEE_MACInit(op, NULL, 0);
-    res = TEE_MACComputeFinal(
-        op,
-        params[0].memref.buffer,
-        params[0].memref.size,
-        temp_buffer,
-        &mac_len
-    );
-
+    res = TEE_MACComputeFinal(op, msg, msg_sz, mac, &mac_sz);
     if (res == TEE_SUCCESS)
     {
-        TEE_MemMove(params[1].memref.buffer, temp_buffer, mac_len);
-        params[1].memref.size = mac_len;
+        TEE_MemMove(params[1].memref.buffer, mac, mac_sz);
+        params[1].memref.size = mac_sz;
     }
 
-    TEE_Free(temp_buffer);
+    DMSG("Sign: key_handle=%p, msg_sz=%zu", sess->key_handle, msg_sz);
+    DMSG("Sign MAC: %02x%02x%02x%02x", 
+        ((uint8_t*)mac)[0], ((uint8_t*)mac)[1], 
+        ((uint8_t*)mac)[2], ((uint8_t*)mac)[3]);
+
 exit:
     TEE_FreeOperation(op);
+    TEE_Free(msg);
+    TEE_Free(mac);
     return res;
 }
 
@@ -1101,6 +1064,10 @@ static TEE_Result secoc_verify(void *session, uint32_t pt, TEE_Param params[4])
     TEE_Result res;
     TEE_OperationHandle op = TEE_HANDLE_NULL;
     TeeSession_t *sess = NULL;
+    void *msg = NULL;
+    size_t msg_sz = 0U;
+    void *mac = NULL;
+    size_t mac_sz = 0U;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
         TEE_PARAM_TYPE_MEMREF_INPUT, // message
@@ -1109,7 +1076,7 @@ static TEE_Result secoc_verify(void *session, uint32_t pt, TEE_Param params[4])
         TEE_PARAM_TYPE_NONE
     );
 
-    DMSG("Session %p: cmac operation", session);
+    DMSG("Session %p: SecOC verify operation", session);
     sess = (TeeSession_t *)session;
 
     if (pt != exp_pt)
@@ -1123,6 +1090,19 @@ static TEE_Result secoc_verify(void *session, uint32_t pt, TEE_Param params[4])
         return TEE_ERROR_BAD_STATE;
     }
 
+    msg_sz = params[0].memref.size;
+    mac_sz = params[1].memref.size;
+
+    msg = TEE_Malloc(msg_sz, 0);
+    mac = TEE_Malloc(mac_sz, 0);
+    if (!msg || !mac)
+    {
+        res = TEE_ERROR_OUT_OF_MEMORY;
+        goto exit;
+    }
+    TEE_MemMove(msg, params[0].memref.buffer, msg_sz);
+    TEE_MemMove(mac, params[1].memref.buffer, mac_sz);
+
     res = TEE_AllocateOperation(&op, sess->algo, TEE_MODE_MAC, sess->key_size * 8);
     if (res != TEE_SUCCESS)
     {
@@ -1138,17 +1118,19 @@ static TEE_Result secoc_verify(void *session, uint32_t pt, TEE_Param params[4])
     }
 
     TEE_MACInit(op, NULL, 0);
-    res = TEE_MACCompareFinal(
-        op,
-        params[0].memref.buffer,
-        params[0].memref.size,
-        params[1].memref.buffer,
-        params[1].memref.size
-    );
-    params[2].value.a = (res == TEE_SUCCESS);
+    TEE_Result cmp_res = TEE_MACCompareFinal(op, msg, msg_sz, mac, mac_sz);
+    params[2].value.a = (cmp_res == TEE_SUCCESS);
+    res = TEE_SUCCESS;
+
+    DMSG("Verify: key_handle=%p, msg_sz=%zu, mac_sz=%zu", sess->key_handle, msg_sz, mac_sz);
+    DMSG("Verify input MAC: %02x%02x%02x%02x",
+        ((uint8_t*)mac)[0], ((uint8_t*)mac)[1],
+        ((uint8_t*)mac)[2], ((uint8_t*)mac)[3]);
 
 exit:
     TEE_FreeOperation(op);
+    TEE_Free(msg);
+    TEE_Free(mac);
     return res;
 }
 

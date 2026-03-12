@@ -407,6 +407,110 @@ int tee_test_run(void)
 
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = key_id;
+    op.params[0].tmpref.size = strlen(key_id);
+    op.params[1].tmpref.buffer = hkdf_test_case_01.salt;
+    op.params[1].tmpref.size = hkdf_test_case_01.salt_len;
+    op.params[2].tmpref.buffer = hkdf_test_case_01.info;
+    op.params[2].tmpref.size = hkdf_test_case_01.info_len;
+
+    res = TEEC_InvokeCommand(&sess, CMD_SECOC_INIT, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("SecOC Init", 1);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_MEMREF_TEMP_OUTPUT,
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    char *message = "CAN_ID:0x123|DATA:AABBCCDD";
+
+    op.params[0].tmpref.buffer = message;
+    op.params[0].tmpref.size = strlen(message);
+    op.params[1].tmpref.buffer = aes_cmac;
+    op.params[1].tmpref.size = sizeof(aes_cmac);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SECOC_SIGN, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("SecOC Sign", 1);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_MEMREF_TEMP_INPUT,
+        TEEC_VALUE_OUTPUT,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = message;
+    op.params[0].tmpref.size = strlen(message);
+    op.params[1].tmpref.buffer = aes_cmac;
+    op.params[1].tmpref.size = sizeof(aes_cmac);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SECOC_VERIFY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    if (op.params[2].value.a)
+    {
+        RESULT_PRINT("SecOC Verify (Correct Data)", 1);
+    }
+    else
+    {
+        RESULT_PRINT("SecOC Verify (Correct Data)", 0);
+    }
+
+    char *tampered = "CAN_ID:0x123|DATA:DEADBEEF";
+
+    op.params[0].tmpref.buffer = tampered;
+    op.params[0].tmpref.size = strlen(tampered);
+    op.params[1].tmpref.buffer = aes_cmac;
+    op.params[1].tmpref.size = sizeof(aes_cmac);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SECOC_VERIFY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    if (!op.params[2].value.a)
+    {
+        RESULT_PRINT("SecOC Verify (Tampered Data)", 1);
+    }
+    else
+    {
+        RESULT_PRINT("SecOC Verify (Tampered Data)", 0);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
         TEEC_MEMREF_TEMP_INPUT, // key id
         TEEC_VALUE_OUTPUT, // Get the result of the deletion from TEE
         TEEC_NONE,
