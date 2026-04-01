@@ -233,7 +233,147 @@ clean:
 
 static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
 {
+    TEE_Result res;
+    TEE_ObjectHandle object = TEE_HANDLE_NULL;
+    TEE_ObjectHandle key_handle = TEE_HANDLE_NULL;
+    TEE_ObjectInfo object_info = {0U};
+    TEE_Attribute attrs[2];
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    uint32_t attr_count = 0U;
+    char *key_id = NULL;
+    size_t key_id_sz = 0U;
+    char *digest = NULL;
+    size_t digest_sz = 0U;
+    char *signature = NULL;
+    size_t signature_sz = 0U;
+    char priv_key_id[64];
+    char priv_key[32] = {0U};
+    size_t priv_key_id_sz = 0U;
+    uint32_t read_bytes = 0U;
 
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_OUTPUT,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    key_id_sz = params[0].memref.size;
+    key_id = TEE_Malloc(key_id_sz, 0);
+    if (key_id == NULL)
+    {
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(key_id, params[0].memref.buffer, key_id_sz);
+
+    digest_sz = params[1].memref.size;
+    digest = TEE_Malloc(digest_sz, 0);
+    if (digest == NULL)
+    {
+        TEE_Free(key_id);
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(digest, params[1].memref.buffer, digest_sz);
+
+    signature_sz = params[2].memref.size;
+    signature = TEE_Malloc(signature_sz, 0);
+    if (signature == NULL)
+    {
+        TEE_Free(key_id);
+        TEE_Free(digest);
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+
+    TEE_MemMove(priv_key_id, key_id, key_id_sz);
+    TEE_MemMove(priv_key_id + key_id_sz, "_priv", 5U);
+    priv_key_id_sz = key_id_sz + 5U;
+
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        priv_key_id, priv_key_id_sz,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_SHARE_READ,
+        &object
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        TEE_Free(key_id);
+        TEE_Free(digest);
+        TEE_Free(signature);
+        return res;
+    }
+
+    res = TEE_GetObjectInfo1(object, &object_info);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_GetObjectInfo1 failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_ReadObjectData(object, priv_key, object_info.dataSize, &read_bytes);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_ReadObjectData failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_ECDSA_KEYPAIR, 256U, &key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_AllocateTransientObject failed: 0x%x", res);
+        goto clean;
+    }
+
+    TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_ECC_PRIVATE_VALUE, priv_key, read_bytes);
+    attr_count++;
+    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_ECC_CURVE, TEE_ECC_CURVE_NIST_P256, 0U);
+    attr_count++;
+
+    res = TEE_PopulateTransientObject(key_handle, attrs, attr_count);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_PopulateTransientObject failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AllocateOperation(&op, TEE_ALG_ECDSA_P256, TEE_MODE_SIGN, 256U);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_AllocateOperation failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_SetOperationKey(op, key_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_SetOperationKey failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_AsymmetricSignDigest(op, NULL, 0U, digest, digest_sz, signature, signature_sz);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_AsymmetricSignDigest failed: 0x%x", res);
+    }
+    else
+    {
+        TEE_MemMove(params[2].memref.buffer, signature, signature_sz);
+    }
+
+clean:
+    TEE_CloseObject(object);
+    TEE_FreeTransientObject(key_handle);
+    TEE_FreeOperation(op);
+    TEE_Free(key_id);
+    TEE_Free(digest);
+    TEE_Free(signature);
+    return res;
 }
 
 static TEE_Result km_delete_key(uint32_t pt, TEE_Param params[4])
