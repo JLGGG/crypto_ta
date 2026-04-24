@@ -3,6 +3,8 @@
 #include <crypto_ta.h>
 #include <string.h>
 
+#include "../keymgmt_ta/include/keymgmt_ta.h"
+
 typedef struct {
     uint32_t algo;
     uint32_t key_size;
@@ -1134,6 +1136,144 @@ exit:
     return res;
 }
 
+static TEE_Result ecdsa_verify(void *session, uint32_t pt, TEE_Param params[4])
+{
+    TEE_Result res;
+    TEE_Result cmp_res;
+    TEE_OperationHandle op = TEE_HANDLE_NULL;
+    TEE_ObjectHandle pub_handle = TEE_HANDLE_NULL;
+    char *key_id = NULL;
+    size_t key_id_sz = 0U;
+    char *digest = NULL;
+    size_t digest_sz = 0U;
+    char *sig = NULL;
+    size_t sig_sz = 0U;
+    const TEE_UUID km_uuid = KEYMGMT_TA_UUID;
+    TEE_TASessionHandle km_sess = TEE_HANDLE_NULL;
+    uint32_t ret_origin = 0U;
+    TEE_Param km_params[4];
+    TEE_Attribute attrs[3];
+    uint32_t attr_count = 0U;
+    char pub_key[64] = {0};
+    
+    (void)session;
+
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT, // key id
+        TEE_PARAM_TYPE_MEMREF_INPUT, // digest
+        TEE_PARAM_TYPE_MEMREF_INPUT, // signature
+        TEE_PARAM_TYPE_VALUE_OUTPUT
+    );
+
+    if (pt != exp_pt)
+    {
+        res = TEE_ERROR_BAD_PARAMETERS;
+        goto exit;
+    }
+
+    key_id_sz = params[0].memref.size;
+    key_id = TEE_Malloc(key_id_sz, 0U);
+    if (key_id == NULL)
+    {
+        res = TEE_ERROR_OUT_OF_MEMORY;
+        goto exit;
+    }
+    TEE_MemMove(key_id, params[0].memref.buffer, key_id_sz);
+
+    digest_sz = params[1].memref.size;
+    digest = TEE_Malloc(digest_sz, 0U);
+    if (digest == NULL)
+    {
+        res = TEE_ERROR_OUT_OF_MEMORY;
+        goto exit;
+    }
+    TEE_MemMove(digest, params[1].memref.buffer, digest_sz);
+
+    sig_sz = params[2].memref.size;
+    sig = TEE_Malloc(sig_sz, 0U);
+    if (sig == NULL)
+    {
+        res = TEE_ERROR_OUT_OF_MEMORY;
+        goto exit;
+    }
+    TEE_MemMove(sig, params[2].memref.buffer, sig_sz);
+
+    res = TEE_OpenTASession(&km_uuid,
+        TEE_TIMEOUT_INFINITE, 0, NULL, &km_sess, &ret_origin);
+    if (res != TEE_SUCCESS)
+    {
+        goto exit;
+    }
+
+    const uint32_t km_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_MEMREF_OUTPUT,
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    km_params[0].memref.buffer = key_id;
+    km_params[0].memref.size = key_id_sz;
+    km_params[1].memref.buffer = pub_key;
+    km_params[1].memref.size = sizeof(pub_key);
+
+    res = TEE_InvokeTACommand(km_sess, TEE_TIMEOUT_INFINITE, KM_CMD_GET_PUBKEY, km_pt, km_params, &ret_origin);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to call KM TA: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_AllocateTransientObject(TEE_TYPE_ECDSA_PUBLIC_KEY, 256U, &pub_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate object: 0x%x", res);
+        goto exit;
+    }
+
+    TEE_InitRefAttribute(&attrs[attr_count++], TEE_ATTR_ECC_PUBLIC_VALUE_X,
+        pub_key, 32U);
+
+    TEE_InitRefAttribute(&attrs[attr_count++], TEE_ATTR_ECC_PUBLIC_VALUE_Y,
+        pub_key + 32U, 32U);
+
+    TEE_InitValueAttribute(&attrs[attr_count++], TEE_ATTR_ECC_CURVE, TEE_ECC_CURVE_NIST_P256, 0);
+    res = TEE_PopulateTransientObject(pub_handle, attrs, attr_count);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_PopulateTransientObject failed: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_AllocateOperation(&op, TEE_ALG_ECDSA_P256, TEE_MODE_VERIFY, 256U);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to allocate operation: 0x%x", res);
+        goto exit;
+    }
+
+    res = TEE_SetOperationKey(op, pub_handle);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("Failed to set operation key: 0x%x", res);
+        goto exit;
+    }
+
+    cmp_res = TEE_AsymmetricVerifyDigest(op, NULL, 0, digest, 32U, sig, 64U);
+
+    params[3].value.a = (cmp_res == TEE_SUCCESS);
+    res = TEE_SUCCESS;
+
+exit:
+    if (km_sess != TEE_HANDLE_NULL) TEE_CloseTASession(km_sess);
+    if (op != TEE_HANDLE_NULL) TEE_FreeOperation(op);
+    if (pub_handle != TEE_HANDLE_NULL) TEE_FreeTransientObject(pub_handle);
+    TEE_Free(key_id);
+    TEE_Free(digest);
+    TEE_Free(sig);
+    return res;
+}
+
 TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, TEE_Param params[4])
 {
     switch(cmd)
@@ -1193,6 +1333,10 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, 
         case CMD_SECOC_VERIFY:
         {
             return secoc_verify(session, pt, params);
+        }
+        case CMD_ECDSA_VERIFY:
+        {
+            return ecdsa_verify(session, pt, params);
         }
         default:
         {

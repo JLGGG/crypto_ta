@@ -24,6 +24,7 @@ typedef enum {
     CMD_SECOC_INIT,
     CMD_SECOC_SIGN,
     CMD_SECOC_VERIFY,
+    CMD_ECDSA_VERIFY,
     CMD_COUNT
 } TeeCmd_t;
 
@@ -53,7 +54,10 @@ typedef enum {
 #define GCM_TAG_MAX_SIZE        16U
 
 #define SECOC_KEY_ID            "master_key"
-#define SECOC_KEY_ID_LEN        10
+#define SECOC_KEY_ID_LEN        10U
+
+#define ECDSA_KEY_ID            "ecdsa_test_key"
+#define ECDSA_KEY_ID_LEN        14U
 
 // DSA
 typedef struct {

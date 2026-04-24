@@ -356,14 +356,16 @@ static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
         goto clean;
     }
 
-    res = TEE_AsymmetricSignDigest(op, NULL, 0U, digest, digest_sz, signature, signature_sz);
+    uint32_t sig_len = signature_sz;
+    res = TEE_AsymmetricSignDigest(op, NULL, 0U, digest, digest_sz, signature, &sig_len);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_AsymmetricSignDigest failed: 0x%x", res);
     }
     else
     {
-        TEE_MemMove(params[2].memref.buffer, signature, signature_sz);
+        TEE_MemMove(params[2].memref.buffer, signature, sig_len);
+        params[2].memref.size = sig_len;
     }
 
 clean:
@@ -378,11 +380,92 @@ clean:
 
 static TEE_Result km_delete_key(uint32_t pt, TEE_Param params[4])
 {
+    TEE_Result res;
+    TEE_ObjectHandle object = TEE_HANDLE_NULL;
+    char *key_id = NULL;
+    size_t key_id_sz = 0U;
+    char pub_key_id[64];
+    char priv_key_id[64];
+    size_t pub_key_id_sz = 0U;
+    size_t priv_key_id_sz = 0U;
+    uint8_t delete_result = 0U;
 
+    const uint32_t exp_pt = TEE_PARAM_TYPES(
+        TEE_PARAM_TYPE_MEMREF_INPUT,
+        TEE_PARAM_TYPE_VALUE_OUTPUT,
+        TEE_PARAM_TYPE_NONE,
+        TEE_PARAM_TYPE_NONE
+    );
+
+    if (pt != exp_pt)
+    {
+        return TEE_ERROR_BAD_PARAMETERS;
+    }
+
+    key_id_sz = params[0].memref.size;
+    key_id = TEE_Malloc(key_id_sz, 0U);
+    if (!key_id)
+    {
+        return TEE_ERROR_OUT_OF_MEMORY;
+    }
+    TEE_MemMove(key_id, params[0].memref.buffer, key_id_sz);
+
+    TEE_MemMove(pub_key_id, key_id, key_id_sz);
+    TEE_MemMove(pub_key_id + key_id_sz, "_pub", 4U);
+    pub_key_id_sz = key_id_sz + 4U;
+
+    TEE_MemMove(priv_key_id, key_id, key_id_sz);
+    TEE_MemMove(priv_key_id + key_id_sz, "_priv", 5U);
+    priv_key_id_sz = key_id_sz + 5U;
+
+    object = TEE_HANDLE_NULL;
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        pub_key_id, pub_key_id_sz,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_ACCESS_WRITE_META,
+        &object
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        goto exit;
+    }
+    else
+    {
+        delete_result += 1U;
+    }
+    TEE_CloseAndDeletePersistentObject1(object);
+
+    object = TEE_HANDLE_NULL;
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        priv_key_id, priv_key_id_sz,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_ACCESS_WRITE_META,
+        &object
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        goto exit;
+    }
+    else
+    {
+        delete_result += 1U;
+    }
+    TEE_CloseAndDeletePersistentObject1(object);
+
+exit:
+    params[1].value.a = (delete_result == 2U) ? TEE_SUCCESS : TEE_ERROR_STORAGE_NOT_AVAILABLE;
+    TEE_Free(key_id);
+    return res;
 }
 
 TEE_Result TA_InvokeCommandEntryPoint(void *session, uint32_t cmd, uint32_t pt, TEE_Param params[4])
 {
+    (void)session;
+
     switch(cmd)
     {
         case KM_CMD_KEYGEN:

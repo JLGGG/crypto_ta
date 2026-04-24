@@ -2,6 +2,7 @@
 #define TEE_TEST_VECTOR_H
 
 #include "crypto_ta.h"
+#include "keymgmt_ta.h"
 
 #include <stdint.h>
 #include <stddef.h>

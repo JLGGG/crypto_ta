@@ -3,6 +3,9 @@
 
 #include <tee_client_api.h>
 
+#define SUCCESS (1U)
+#define FAIL    (0U)
+
 #define RESULT_PRINT(a, b)                  \
     do {                                    \
         if (b) {                            \
@@ -17,8 +20,10 @@ int tee_test_run(void)
     TEEC_Result res;
     TEEC_Context ctx;
     TEEC_Session sess;
+    TEEC_Session km_sess;
     TEEC_Operation op;
     TEEC_UUID uuid = CRYPTO_TA_UUID;
+    TEEC_UUID km_uuid = KEYMGMT_TA_UUID;
     uint32_t err_origin;
 
     char *input = "Hello OP-TEE Crypto!";
@@ -38,10 +43,18 @@ int tee_test_run(void)
     res = TEEC_OpenSession(&ctx, &sess, &uuid, TEEC_LOGIN_PUBLIC, NULL, NULL, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_OpenSession failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_OpenSession failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_ctx;
     }
 
+    res = TEEC_OpenSession(&ctx, &km_sess, &km_uuid, TEEC_LOGIN_PUBLIC, NULL, NULL, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[KEYMGMT TA]: TEEC_OpenSession failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    /* -------------------- SHA Test  -------------------- */
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
         TEEC_MEMREF_TEMP_INPUT,
@@ -58,7 +71,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SHA256, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -70,11 +83,11 @@ int tee_test_run(void)
 
     if (!result)
     {
-        RESULT_PRINT("SHA-256", 1);
+        RESULT_PRINT("SHA-256", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("SHA-256", 0);
+        RESULT_PRINT("SHA-256", FAIL);
     }
 
     op.params[0].tmpref.buffer = input;
@@ -85,7 +98,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SHA512, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -97,13 +110,14 @@ int tee_test_run(void)
     
     if (!result)
     {
-        RESULT_PRINT("SHA-512", 1);
+        RESULT_PRINT("SHA-512", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("SHA-512", 0);
+        RESULT_PRINT("SHA-512", FAIL);
     }
 
+    /* -------------------- AES-CMAC Test  -------------------- */
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
         TEEC_MEMREF_TEMP_INPUT, // Key
@@ -119,7 +133,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_AES_PREPARE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -139,7 +153,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC_SIGN, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -152,11 +166,11 @@ int tee_test_run(void)
 
     if (!result)
     {
-        RESULT_PRINT("AES-CMAC SIGN", 1);
+        RESULT_PRINT("AES-CMAC SIGN", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("AES-CMAC SIGN", 0);
+        RESULT_PRINT("AES-CMAC SIGN", FAIL);
     }
 
     memset(&op, 0, sizeof(op));
@@ -175,19 +189,20 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_AES_CMAC_VERIFY, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
     if (op.params[2].value.a == true)
     {
-        RESULT_PRINT("AES_CMAC VERIFY", 1);
+        RESULT_PRINT("AES_CMAC VERIFY", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("AES_CMAC VERIFY", 0);
+        RESULT_PRINT("AES_CMAC VERIFY", FAIL);
     }
 
+    /* -------------------- HKDF Test  -------------------- */
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
         TEEC_MEMREF_TEMP_INPUT,
@@ -208,7 +223,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_HKDF_DERIVE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -219,13 +234,14 @@ int tee_test_run(void)
     }
     if (!result)
     {
-        RESULT_PRINT("HKDF", 1);
+        RESULT_PRINT("HKDF", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("HKDF", 0);
+        RESULT_PRINT("HKDF", FAIL);
     }
 
+    /* -------------------- AES-GCM Test  -------------------- */
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
         TEEC_MEMREF_TEMP_INPUT, // Key
@@ -241,7 +257,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_AES_PREPARE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
     
@@ -276,7 +292,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_AES_GCM_ENC, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -293,11 +309,11 @@ int tee_test_run(void)
 
     if (!result)
     {
-        RESULT_PRINT("AES-GCM Encryption", 1);
+        RESULT_PRINT("AES-GCM Encryption", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("AES-GCM Encryption", 0);
+        RESULT_PRINT("AES-GCM Encryption", FAIL);
     }
 
     memset(&op, 0, sizeof(op));
@@ -322,7 +338,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_AES_GCM_DEC, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -334,13 +350,14 @@ int tee_test_run(void)
 
     if (!result)
     {
-        RESULT_PRINT("AES-GCM Decryption", 1);
+        RESULT_PRINT("AES-GCM Decryption", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("AES-GCM Decryption", 0);
+        RESULT_PRINT("AES-GCM Decryption", FAIL);
     }
 
+    /* -------------------- Secure Storage Test  -------------------- */
     char *key_id = SECOC_KEY_ID;
 
     memset(&op, 0, sizeof(op));
@@ -359,13 +376,13 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SS_KEY_WRITE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
-        RESULT_PRINT("Write Key to Secure Storage", 0);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        RESULT_PRINT("Write Key to Secure Storage", FAIL);
         goto cleanup_sess;
     }
     else
     {
-        RESULT_PRINT("Write Key to Secure Storage", 1);
+        RESULT_PRINT("Write Key to Secure Storage", SUCCESS);
     }
 
     uint8_t key_buffer[AES_128_KEY_SIZE];
@@ -387,7 +404,7 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SS_KEY_READ, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
@@ -398,13 +415,14 @@ int tee_test_run(void)
 
     if (!result)
     {
-        RESULT_PRINT("Read Key from Secure Storage", 1);
+        RESULT_PRINT("Read Key from Secure Storage", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("Read Key from Secure Storage", 0);
+        RESULT_PRINT("Read Key from Secure Storage", FAIL);
     }
 
+    /* -------------------- SecOC Test  -------------------- */
     memset(&op, 0, sizeof(op));
     op.paramTypes = TEEC_PARAM_TYPES(
         TEEC_MEMREF_TEMP_INPUT,
@@ -423,12 +441,12 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SECOC_INIT, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
     else
     {
-        RESULT_PRINT("SecOC Init", 1);
+        RESULT_PRINT("SecOC Init", SUCCESS);
     }
 
     memset(&op, 0, sizeof(op));
@@ -449,12 +467,12 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SECOC_SIGN, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
     else
     {
-        RESULT_PRINT("SecOC Sign", 1);
+        RESULT_PRINT("SecOC Sign", SUCCESS);
     }
 
     memset(&op, 0, sizeof(op));
@@ -473,17 +491,17 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SECOC_VERIFY, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
     if (op.params[2].value.a)
     {
-        RESULT_PRINT("SecOC Verify (Correct Data)", 1);
+        RESULT_PRINT("SecOC Verify (Correct Data)", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("SecOC Verify (Correct Data)", 0);
+        RESULT_PRINT("SecOC Verify (Correct Data)", FAIL);
     }
 
     char *tampered = "CAN_ID:0x123|DATA:DEADBEEF";
@@ -496,17 +514,17 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SECOC_VERIFY, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
     if (!op.params[2].value.a)
     {
-        RESULT_PRINT("SecOC Verify (Tampered Data)", 1);
+        RESULT_PRINT("SecOC Verify (Tampered Data)", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("SecOC Verify (Tampered Data)", 0);
+        RESULT_PRINT("SecOC Verify (Tampered Data)", FAIL);
     }
 
     memset(&op, 0, sizeof(op));
@@ -523,21 +541,248 @@ int tee_test_run(void)
     res = TEEC_InvokeCommand(&sess, CMD_SS_KEY_DELETE, &op, &err_origin);
     if (res != TEEC_SUCCESS)
     {
-        printf("TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
         goto cleanup_sess;
     }
 
     if (!op.params[1].value.a)
     {
-        RESULT_PRINT("Delete Key from Secure Storage", 1);
+        RESULT_PRINT("Delete Key from Secure Storage", SUCCESS);
     }
     else
     {
-        RESULT_PRINT("Delete Key from Secure Storage", 0);
+        RESULT_PRINT("Delete Key from Secure Storage", FAIL);
+    }
+
+    /* -------------------- Key Management TA Test  -------------------- */
+    char *km_key_id = ECDSA_KEY_ID;
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // key id
+        TEEC_NONE,
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = km_key_id;
+    op.params[0].tmpref.size = strlen(km_key_id);
+
+    res = TEEC_InvokeCommand(&km_sess, KM_CMD_KEYGEN, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[KEYMGMT TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("ECDSA KeyGen", SUCCESS);
+    }
+
+    uint8_t km_pub_key[64];
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // key id
+        TEEC_MEMREF_TEMP_OUTPUT, // pub key
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = km_key_id;
+    op.params[0].tmpref.size = strlen(km_key_id);
+    op.params[1].tmpref.buffer = km_pub_key;
+    op.params[1].tmpref.size = sizeof(km_pub_key);
+
+    res = TEEC_InvokeCommand(&km_sess, KM_CMD_GET_PUBKEY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[KEYMGMT TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("ECDSA GetPubKey", SUCCESS);
+    }
+
+    char *test_fw = "Firmware Image v1.0 - Test Data";
+    uint8_t digest[32];
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // firmware
+        TEEC_MEMREF_TEMP_OUTPUT, // digest
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = test_fw;
+    op.params[0].tmpref.size = strlen(test_fw);
+    op.params[1].tmpref.buffer = digest;
+    op.params[1].tmpref.size = sizeof(digest);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SHA256, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("Digest Generation for FW", SUCCESS);
+    }
+
+    uint8_t signature[64];
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // key id
+        TEEC_MEMREF_TEMP_INPUT, // digest
+        TEEC_MEMREF_TEMP_OUTPUT, // signature
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = km_key_id;
+    op.params[0].tmpref.size = strlen(km_key_id);
+    op.params[1].tmpref.buffer = digest;
+    op.params[1].tmpref.size = sizeof(digest);
+    op.params[2].tmpref.buffer = signature;
+    op.params[2].tmpref.size = sizeof(signature);
+
+    res = TEEC_InvokeCommand(&km_sess, KM_CMD_SIGN, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[KEYMGMT TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("Signature Generation for FW", SUCCESS);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // key id
+        TEEC_MEMREF_TEMP_INPUT, // digest
+        TEEC_MEMREF_TEMP_INPUT, // signature
+        TEEC_VALUE_OUTPUT
+    );
+
+    op.params[0].tmpref.buffer = km_key_id;
+    op.params[0].tmpref.size = strlen(km_key_id);
+    op.params[1].tmpref.buffer = digest;
+    op.params[1].tmpref.size = sizeof(digest);
+    op.params[2].tmpref.buffer = signature;
+    op.params[2].tmpref.size = sizeof(signature);
+
+    res = TEEC_InvokeCommand(&sess, CMD_ECDSA_VERIFY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        if (op.params[3].value.a == SUCCESS)
+        {
+            RESULT_PRINT("ECDSA Verify (Valid)", SUCCESS);
+        }
+        else
+        {
+            RESULT_PRINT("ECDSA Verify (Valid)", FAIL);
+        }
+    }
+
+    char *tamp_fw = "Tampered Firmware";
+    uint8_t tampered_digest[32];
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // tampered firmware
+        TEEC_MEMREF_TEMP_OUTPUT, // digest
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = tamp_fw;
+    op.params[0].tmpref.size = strlen(tamp_fw);
+    op.params[1].tmpref.buffer = tampered_digest;
+    op.params[1].tmpref.size = sizeof(tampered_digest);
+
+    res = TEEC_InvokeCommand(&sess, CMD_SHA256, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        RESULT_PRINT("Digest Generation for Tampered FW", SUCCESS);
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // key id
+        TEEC_MEMREF_TEMP_INPUT, // digest
+        TEEC_MEMREF_TEMP_INPUT, // signature
+        TEEC_VALUE_OUTPUT
+    );
+
+    op.params[0].tmpref.buffer = km_key_id;
+    op.params[0].tmpref.size = strlen(km_key_id);
+    op.params[1].tmpref.buffer = tampered_digest;
+    op.params[1].tmpref.size = sizeof(tampered_digest);
+    op.params[2].tmpref.buffer = signature;
+    op.params[2].tmpref.size = sizeof(signature);
+
+    res = TEEC_InvokeCommand(&sess, CMD_ECDSA_VERIFY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[CRYPTO TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+    else
+    {
+        if (op.params[3].value.a == SUCCESS)
+        {
+            RESULT_PRINT("ECDSA Verify (Tampered)", FAIL);
+        }
+        else
+        {
+            RESULT_PRINT("ECDSA Verify (Tampered)", SUCCESS);
+        }
+    }
+
+    memset(&op, 0, sizeof(op));
+    op.paramTypes = TEEC_PARAM_TYPES(
+        TEEC_MEMREF_TEMP_INPUT, // key id
+        TEEC_VALUE_OUTPUT, // Get the result of the deletion from TEE
+        TEEC_NONE,
+        TEEC_NONE
+    );
+
+    op.params[0].tmpref.buffer = km_key_id;
+    op.params[0].tmpref.size = strlen(km_key_id);
+
+    res = TEEC_InvokeCommand(&km_sess, KM_CMD_DELETE_KEY, &op, &err_origin);
+    if (res != TEEC_SUCCESS)
+    {
+        printf("[KEYMGMT TA]: TEEC_InvokeCommand failed: 0x%x origin=0x%x\n", res, err_origin);
+        goto cleanup_sess;
+    }
+
+    if (!op.params[1].value.a)
+    {
+        RESULT_PRINT("Delete Key from Key Management TA", SUCCESS);
+    }
+    else
+    {
+        RESULT_PRINT("Delete Key from Key Management TA", FAIL);
     }
 
 cleanup_sess:
     TEEC_CloseSession(&sess);
+    TEEC_CloseSession(&km_sess);
 cleanup_ctx:
     TEEC_FinalizeContext(&ctx);
     return res != TEEC_SUCCESS;
