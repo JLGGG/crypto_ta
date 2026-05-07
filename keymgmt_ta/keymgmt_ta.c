@@ -116,7 +116,7 @@ static TEE_Result km_keygen(uint32_t pt, TEE_Param params[4])
         pub_key_id, pub_key_id_sz,
         flags,
         TEE_HANDLE_NULL,
-        pub_key, 64,
+        pub_key, 64U,
         &pub_obj
     );
     if (res != TEE_SUCCESS)
@@ -131,7 +131,7 @@ static TEE_Result km_keygen(uint32_t pt, TEE_Param params[4])
         priv_key_id, priv_key_id_sz,
         flags,
         TEE_HANDLE_NULL,
-        priv_key, 32,
+        priv_key, 32U,
         &priv_obj
     );
     if (res != TEE_SUCCESS)
@@ -234,10 +234,12 @@ clean:
 static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
 {
     TEE_Result res;
-    TEE_ObjectHandle object = TEE_HANDLE_NULL;
+    TEE_ObjectHandle priv_obj = TEE_HANDLE_NULL;
+    TEE_ObjectHandle pub_obj = TEE_HANDLE_NULL;
     TEE_ObjectHandle key_handle = TEE_HANDLE_NULL;
-    TEE_ObjectInfo object_info = {0U};
-    TEE_Attribute attrs[2];
+    TEE_ObjectInfo priv_obj_info = {0U};
+    TEE_ObjectInfo pub_obj_info = {0U};
+    TEE_Attribute attrs[4];
     TEE_OperationHandle op = TEE_HANDLE_NULL;
     uint32_t attr_count = 0U;
     char *key_id = NULL;
@@ -247,9 +249,13 @@ static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
     char *signature = NULL;
     size_t signature_sz = 0U;
     char priv_key_id[64];
+    char pub_key_id[64];
     char priv_key[32] = {0U};
+    char pub_key[64] = {0U};
+    size_t pub_key_id_sz = 0U;
     size_t priv_key_id_sz = 0U;
-    uint32_t read_bytes = 0U;
+    uint32_t pub_read_bytes = 0U;
+    uint32_t priv_read_bytes = 0U;
 
     const uint32_t exp_pt = TEE_PARAM_TYPES(
         TEE_PARAM_TYPE_MEMREF_INPUT,
@@ -289,15 +295,18 @@ static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
         return TEE_ERROR_OUT_OF_MEMORY;
     }
 
+    TEE_MemMove(pub_key_id, key_id, key_id_sz);
+    TEE_MemMove(pub_key_id + key_id_sz, "_pub", 4U);
     TEE_MemMove(priv_key_id, key_id, key_id_sz);
     TEE_MemMove(priv_key_id + key_id_sz, "_priv", 5U);
+    pub_key_id_sz = key_id_sz + 4U;
     priv_key_id_sz = key_id_sz + 5U;
 
     res = TEE_OpenPersistentObject(
         TEE_STORAGE_PRIVATE,
-        priv_key_id, priv_key_id_sz,
+        pub_key_id, pub_key_id_sz,
         TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_SHARE_READ,
-        &object
+        &pub_obj
     );
 
     if (res != TEE_SUCCESS)
@@ -309,14 +318,44 @@ static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
         return res;
     }
 
-    res = TEE_GetObjectInfo1(object, &object_info);
+    res = TEE_OpenPersistentObject(
+        TEE_STORAGE_PRIVATE,
+        priv_key_id, priv_key_id_sz,
+        TEE_DATA_FLAG_ACCESS_READ | TEE_DATA_FLAG_SHARE_READ,
+        &priv_obj
+    );
+
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_OpenPersistentObject failed: 0x%x", res);
+        TEE_Free(key_id);
+        TEE_Free(digest);
+        TEE_Free(signature);
+        return res;
+    }
+
+    res = TEE_GetObjectInfo1(pub_obj, &pub_obj_info);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_GetObjectInfo1 failed: 0x%x", res);
         goto clean;
     }
 
-    res = TEE_ReadObjectData(object, priv_key, object_info.dataSize, &read_bytes);
+    res = TEE_GetObjectInfo1(priv_obj, &priv_obj_info);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_GetObjectInfo1 failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_ReadObjectData(pub_obj, pub_key, pub_obj_info.dataSize, &pub_read_bytes);
+    if (res != TEE_SUCCESS)
+    {
+        EMSG("TEE_ReadObjectData failed: 0x%x", res);
+        goto clean;
+    }
+
+    res = TEE_ReadObjectData(priv_obj, priv_key, priv_obj_info.dataSize, &priv_read_bytes);
     if (res != TEE_SUCCESS)
     {
         EMSG("TEE_ReadObjectData failed: 0x%x", res);
@@ -330,10 +369,10 @@ static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
         goto clean;
     }
 
-    TEE_InitRefAttribute(&attrs[attr_count], TEE_ATTR_ECC_PRIVATE_VALUE, priv_key, read_bytes);
-    attr_count++;
-    TEE_InitValueAttribute(&attrs[attr_count], TEE_ATTR_ECC_CURVE, TEE_ECC_CURVE_NIST_P256, 0U);
-    attr_count++;
+    TEE_InitRefAttribute(&attrs[attr_count++], TEE_ATTR_ECC_PRIVATE_VALUE, priv_key, 32U);
+    TEE_InitRefAttribute(&attrs[attr_count++], TEE_ATTR_ECC_PUBLIC_VALUE_X, pub_key, 32U);
+    TEE_InitRefAttribute(&attrs[attr_count++], TEE_ATTR_ECC_PUBLIC_VALUE_Y, pub_key + 32U, 32U);
+    TEE_InitValueAttribute(&attrs[attr_count++], TEE_ATTR_ECC_CURVE, TEE_ECC_CURVE_NIST_P256, 0U);
 
     res = TEE_PopulateTransientObject(key_handle, attrs, attr_count);
     if (res != TEE_SUCCESS)
@@ -369,7 +408,8 @@ static TEE_Result km_sign(uint32_t pt, TEE_Param params[4])
     }
 
 clean:
-    TEE_CloseObject(object);
+    TEE_CloseObject(priv_obj);
+    TEE_CloseObject(pub_obj);
     TEE_FreeTransientObject(key_handle);
     TEE_FreeOperation(op);
     TEE_Free(key_id);

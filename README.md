@@ -1,6 +1,5 @@
 # Crypto TA for OP-TEE
-
-Examples of Trusted Application in OP-TEE Crypto
+This project focuses on learning a trusted application by making crypto features and a key management TA.   
 
 ## Features
 - SHA-256   
@@ -10,6 +9,7 @@ Examples of Trusted Application in OP-TEE Crypto
 - HKDF-SHA-256   
 - Secure Storage   
 - SecOC   
+- Key Management TA   
 
 ## How to build
 1. Set up an OP-TEE development environment (QEMU v8)   
@@ -69,5 +69,6 @@ grep -r "*" ~/optee/optee_os/lib/libutee/include
 
 ## UUID   
 ```
-12345678-1234-1234-1234-123456789abc
+Crypto TA: 12345678-1234-1234-1234-123456789abc
+Key Management TA: 23456789-2345-2345-2345-23456789abcd
 ```

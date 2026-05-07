@@ -1212,6 +1212,7 @@ static TEE_Result ecdsa_verify(void *session, uint32_t pt, TEE_Param params[4])
         TEE_PARAM_TYPE_NONE
     );
 
+    memset(km_params, 0, sizeof(km_params));
     km_params[0].memref.buffer = key_id;
     km_params[0].memref.size = key_id_sz;
     km_params[1].memref.buffer = pub_key;
